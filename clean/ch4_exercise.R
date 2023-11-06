@@ -128,3 +128,80 @@ d2 = d[d$age >= 18, ]
 d2 %>% glimpse()
 
 dens(d2$height, norm.comp = TRUE)
+
+# Prior predictive simulation ----
+# Average height mu
+curve(dnorm(x, 178, 20), from = 100, to = 250)
+
+# standard deviation sigma
+curve(dunif(x, 0, 50), from = -10, to = 60)
+curve(dexp(x, rate = .3), from = -10, 60)
+
+# prior predictive simulation
+sample_mu = rnorm(1e4, mean = 178, sd = 20)
+# sample_sigma = runif(1e4, min = 0, max = 50)
+sample_sigma = rexp(1e4, rate = 0.3)
+
+prior_h = rnorm(1e4, mean = sample_mu, sd = sample_sigma)
+dens(prior_h)
+histo(prior_h)
+
+# It's important that your prior not be based on the values in your data, but
+# only on what you know about the data before you see it
+
+
+# Grid approximation of the posterior distribution ----
+mu_list = seq(from = 150, to = 160, length.out = 100)
+sigma_list = seq(from = 7, to = 9, length.out = 100)
+post = expand.grid(mu = mu_list, sigma = sigma_list)
+post$LL = sapply(1:nrow(post), function(i) sum(
+    dnorm(d2$height, post$mu[i], post$sigma[i], log = TRUE)))
+post$prod = post$LL + dnorm(post$mu, 178, 20, log = TRUE) +
+    dunif(post$sigma, 0, 50, TRUE)
+post$prob = exp(post$prod - max(post$prod))
+
+contour_xyz(post$mu, post$sigma, post$prob)
+
+image_xyz(post$mu, post$sigma, post$prob)
+
+# Sampling from the posterior ----
+post %>% str()
+sample_rows = sample(1:nrow(post), size = 1e4, replace = TRUE, prob = post$prob)
+sample_mu = post$mu[sample_rows]
+sample_sigma = post$sigma[sample_rows]
+
+plot(sample_mu, sample_sigma, cex = 0.6, pch = 16, col = col.alpha(rangi2, 0.1))
+
+# Summarise the samples
+dens(sample_mu, adj = 1)
+histo(sample_mu, int = .1)
+
+dens(sample_sigma)
+histo(sample_sigma, int = 0.08)
+
+PI(sample_sigma)
+PI(sample_mu)
+
+HPDI(sample_sigma)
+HPDI(sample_mu)
+
+d3 = sample(d2$height, size = 20)
+# Grid approximation of the posterior distribution ----
+mu_list = seq(from = 150, to = 170, length.out = 200)
+sigma_list = seq(from = 4, to = 20, length.out = 100)
+post2 = expand.grid(mu = mu_list, sigma = sigma_list)
+post2$LL = sapply(1:nrow(post2), function(i) sum(
+    dnorm(d2$height, post2$mu[i], post2$sigma[i], log = TRUE)))
+post2$prod = post2$LL + dnorm(post2$mu, 178, 20, log = TRUE) +
+    dunif(post2$sigma, 0, 50, TRUE)
+post2$prob = exp(post2$prod - max(post2$prod))
+
+sample2_rows = sample(1:nrow(post2), size = 1e4, replace = TRUE, prob = post2$prob)
+sample2_mu = post2$mu[sample2_rows]
+sample2_sigma = post2$sigma[sample2_rows]
+
+plot(sample2_mu, sample2_sigma, cex = 0.7, col = col.alpha(rangi2, 0.1), 
+     xlab = "mu", ylab = "sigma", pch = 16)
+
+dens(sample2_sigma, adj = 2, norm.comp = TRUE)
+histo(sample2_sigma, int = 0.05)

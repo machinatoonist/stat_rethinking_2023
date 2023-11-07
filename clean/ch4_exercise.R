@@ -205,3 +205,96 @@ plot(sample2_mu, sample2_sigma, cex = 0.7, col = col.alpha(rangi2, 0.1),
 
 dens(sample2_sigma, adj = 2, norm.comp = TRUE)
 histo(sample2_sigma, int = 0.05)
+
+# Quadratic approximation ----
+
+flist = alist(
+    height ~ dnorm(mu, sigma),
+    mu ~ dnorm(178, 20),
+    sigma ~ dunif(0, 50)
+)
+
+start = list(
+    mu = mean(d2$height),
+    sigma = sd(d2$height)
+)
+
+model_fit = quap(flist, data = d2, start = start)
+
+precis(model_fit)
+
+model_fit_2 = quap(
+    alist(
+        height ~ dnorm(mu, sigma),
+        mu ~ dnorm(178, 0.1),
+        sigma ~ dunif(0, 50)
+        ), data = d2)
+
+precis(model_fit_2)
+
+# Sampling from a quap model ----
+# The posterior is multi-dimensional Gaussian distribution consisting of
+# a matrix of variances and covariances
+vcov(model_fit)
+
+# The variance covariance matrix can be factored into a vectors of variances for parameters
+# and a correlation matrix that defines the correlation between parameters
+diag(vcov(model_fit))
+cov2cor(vcov(model_fit))
+
+post = extract.samples(model_fit, n = 1e4)
+head(post)
+precis(post)
+dens(post$mu)
+dens(post$sigma)
+
+precis(model_fit)
+plot(post)
+str(plot)
+
+library(MASS)
+# Multivariate normal simulation
+post_2 = mvrnorm(n = 1e4, mu = coef(model_fit), Sigma = vcov(model_fit))
+precis(post_2)
+plot(post_2)
+
+# Building a linear model ----
+plot(d2$height, d2$weight)
+plot(d$height, d$weight)
+
+# Prior predictive simulation
+set.seed(2718)
+N = 100
+a = rnorm(N, 178, 20)
+b = rnorm(N, 0, 10)
+
+# The range in height and weight is unrealistic
+plot_models = function(a, b, N, title = "b ~ dnorm(0, 10)") {
+    plot(NULL, xlim = range(d2$weight), ylim = c(-100, 400),
+     xlab = "weight", ylab = "height")
+    abline(h = 0, lty = 2)
+    abline(h = 272, lty = 1, lwd = 0.5)
+    mtext(title)
+    xbar = mean(d2$weight)
+    for (i in 1:N) curve(a[i] + b[i] * (x - xbar),
+                         from = min(d2$weight), to = max(d2$weight), add = TRUE,
+                         col = col.alpha("black", 0.2))
+    }
+
+plot_models(
+    a = rnorm(N, 178, 20), 
+    b = rnorm(N, 0, 10), 
+    N = 100
+)
+
+# Redefine beta with a log-normal distribution
+b = rlnorm(1e4, 0, 1)
+dens(b, xlim = c(0, 5), adj = 0.1)
+
+plot_models(
+    a = rnorm(100, 178, 20), 
+    b = rlnorm(100, 0, 1), 
+    N = 100, 
+    title = "b ~ dlnorm(0, 1)"
+)
+

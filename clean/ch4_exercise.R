@@ -298,3 +298,64 @@ plot_models(
     title = "b ~ dlnorm(0, 1)"
 )
 
+xbar = mean(d2$weight)
+
+## Fit model ----
+model_fit_3 = quap(
+    alist(
+        height ~ dnorm(mu, sigma),
+        mu <- a + b * (weight - xbar),
+        a ~ dnorm(178, 20),
+        b ~ dlnorm(0, 1),
+        sigma ~ dunif(0, 50)
+    ), data = d2
+)
+
+model_fit_4 = quap(
+    alist(
+        height ~ dnorm(mu, sigma),
+        mu <- a + exp(log_b) * (weight - xbar),
+        a ~ dnorm(178, 20),
+        log_b ~ dnorm(0, 1),
+        sigma ~ dunif(0, 50)
+    ), data = d2
+)
+
+precis(model_fit_3)
+precis(model_fit_4)
+
+## Covariance between parameters ----
+# View the covariances among the parameters with vcov
+round(vcov(model_fit_3), 3)
+
+pairs(model_fit_3)
+
+## Plot model fit ----
+plot(height ~ weight, data = d2, col = rangi2)
+post = extract.samples(model_fit_3)
+a_map = mean(post$a)
+b_map = mean(post$b)
+curve(a_map + b_map * (x - xbar), add = TRUE)
+
+post[1:5,]
+
+# Fit to just 10 data points
+N = 10
+dN = d2[1:N, ]
+mN = quap(
+    alist(
+        height ~ dnorm(mu, sigma),
+        mu <- a + b * (weight - mean(weight)),
+        a ~ dnorm(178, 20),
+        b ~ dlnorm(0, 1),
+        sigma ~ dunif(0, 50)
+    ), data = dN
+)
+
+# extract 20 samples from the posterior
+post = extract.samples(mN, n = 20)
+plot(dN$weight, dN$height,
+     xlim = range(d2$weight), ylim = range(d2$height),
+     col = rangi2, xlab = "weight", ylab = "height")
+mtext(concat("N = ", N))
+

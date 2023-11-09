@@ -340,7 +340,7 @@ curve(a_map + b_map * (x - xbar), add = TRUE)
 post[1:5,]
 
 # Fit to just 10 data points
-N = 10
+N = 352
 dN = d2[1:N, ]
 mN = quap(
     alist(
@@ -359,3 +359,105 @@ plot(dN$weight, dN$height,
      col = rangi2, xlab = "weight", ylab = "height")
 mtext(concat("N = ", N))
 
+for (i in 1:20) {
+    curve(post$a[i] + post$b[i] * (x - mean(dN$weight)),
+          col = col.alpha("black", 0.3), add = TRUE)
+}
+
+# Plotting regression intervals and contours ----
+# Generate a vector of predicted means at x = 50
+post = extract.samples(model_fit_3)
+mu_at_50 = post$a + post$b * (50 - xbar)
+
+dens(mu_at_50, col = rangi2, lwd = 2, xlab = "mu|weight = 50")
+
+# The components of mu are alpha and beta.  These have Gaussian distributions 
+# and so too does mu_at_50
+
+PI(mu_at_50, prob = 0.89)
+
+# Compute a posterior distribution for mu for each case in the data
+mu = link(model_fit_3)
+str(mu)
+dim(mu)
+class(mu)
+
+# define a sequence of weights to compute predictions for
+weight_seq = seq(from = 25, to = 70, by = 1)
+length(weight_seq)
+
+# use line to compute mu for each samples from posterior
+# and for each weight in weight_seq
+mu = link(model_fit_3, data = data.frame(weight = weight_seq))
+str(mu)
+
+# use type = "n" to hide raw data
+plot(height ~ weight, d2, type = "n")
+
+# loop over samples and plot each mu value
+for (i in 1:100) {
+    points(weight_seq, mu[i,], pch = 16, col = col.alpha(rangi2, 0.1))
+}
+
+# summarise the distribution of mu
+mu_mean = apply(mu, 2, mean)
+mu_PI = apply(mu, 2, PI, prob = 0.89)
+
+# plot the raw data
+# fade out points to make line and interval for visible
+plot(height ~ weight, data = d2, col = col.alpha(rangi2, 0.5))
+
+# plot the MAP line, aka the mean mu for each weight
+lines(weight_seq, mu_mean)
+
+# plot the 89% PI
+shade(mu_PI, weight_seq)
+
+# How link() works ----
+post = extract.samples(model_fit_3)
+mu_link = function(weight) {post$a + post$b * (weight - xbar)}
+weight_seq = seq(from = 25, to = 70, by = 1)
+mu = sapply(weight_seq, mu_link)
+mu_mean = apply(mu, 2, mean)
+mu_CI = apply(mu, 2, PI, prob = 0.89)
+
+plot(height ~ weight, data = d2, col = col.alpha(rangi2, 0.5))
+lines(weight_seq, mu_mean)
+shade(mu_CI, weight_seq)
+
+# Prediction intervals ----
+# Simulate heights for each unique weight
+# Use the sigma and mean sampled from the posterior distribution
+sim_height = sim(model_fit_3, 
+                 data = list(weight = weight_seq), 
+                 n = 1e4) # Use n to control the number of samples
+str(sim_height)
+dim(sim_height)
+
+height_PI = apply(sim_height, 2, PI, prob = 0.89)
+
+# plot raw data
+plot(height ~ weight, d2, col = col.alpha(rangi2, 0.5))
+
+# draw MAP line
+lines(weight_seq, mu_mean)
+
+# draw HPDI region for line
+shade(mu_PI, weight_seq)
+
+# draw PI region for simulated heights
+shade(height_PI, weight_seq)
+
+# How sim() works ----
+# simulate a height for each set of samples and for each value of weight
+post = extract.samples(model_fit_3)
+weight_seq = 25:70
+sim_height = sapply(weight_seq, function(weight) {
+    rnorm(
+        n = nrow(post),
+        mean = post$a + post$b * (weight - xbar),
+        sd = post$sigma
+        
+    )
+    })
+height_PI = apply(sim_height, 2, PI, prob = 0.89)

@@ -461,3 +461,98 @@ sim_height = sapply(weight_seq, function(weight) {
     )
     })
 height_PI = apply(sim_height, 2, PI, prob = 0.89)
+
+# Polynomial regression ----
+d = Howell1
+
+plot(height ~ weight, d)
+
+# Define a parabolic model
+# Standardise the predictor variable (as a default)
+d$weight_s = (d$weight - mean(d$weight))/sd(d$weight)
+# Pre-process any variable transformations so recalculation isn't required every iteration
+d$weight_s2 = d$weight_s^2
+
+model_fit_5 = quap(
+    alist(
+        height ~ dnorm(mu, sigma),                 # Stochastic
+        mu <- a + b1 * weight_s + b2 * weight_s2,  # Deterministic 
+        a ~ dnorm(178, 20), 
+        b1 ~ dlnorm(0, 1),
+        b2 ~ dnorm(0, 1),  # We don't want a positive constraint for b2
+        sigma ~ dunif(0, 50)
+    ), data = d
+)
+
+precis(model_fit_5)
+
+# Plot the model fits using the mean relationship and 89% intervals of the mean
+weight_seq = seq(from = -2.2, to = 2, length.out = 30)
+pred_dat = list(weight_s = weight_seq, weight_s2 = weight_seq^2)
+mu = link(model_fit_5, data = pred_dat)
+length(weight_seq)
+dim(mu)
+mu_mean = apply(mu, 2, mean)
+mu_PI = apply(mu, 2, PI, prob = 0.89)
+{
+dim(mu_PI)
+mu_PI[1,1]
+mu_PI[2,1]
+typeof(mu_PI)
+class(mu_PI)
+str(mu_PI)
+mean(mu_PI[1,])
+mean(mu_PI[2,])
+max(mu_PI[1,])
+max(mu_PI[2,])
+}
+sim_height = sim(model_fit_5, data = pred_dat)
+dim(sim_height)
+height_PI = apply(sim_height, 2, PI, prob = 0.89)
+
+plot(height ~ weight_s, d, col = col.alpha(rangi2, 0.5))
+class(weight_seq); class(mu_mean)
+lines(x = weight_seq, y = mu_mean)
+shade(mu_PI, weight_seq)
+shade(height_PI, weight_seq)
+
+# Define a cubic model ----
+# Pre-process any variable transformations so recalculation isn't required every iteration
+d$weight_s3 = d$weight_s^3
+
+model_fit_6 = quap(
+    alist(
+        height ~ dnorm(mu, sigma),                 # Stochastic
+        mu <- a + b1 * weight_s + b2 * weight_s2 + b3 * weight_s3,  # Deterministic 
+        a ~ dnorm(178, 20), 
+        b1 ~ dlnorm(0, 1),  # Enforce a positive value on the gradient
+        b2 ~ dnorm(0, 10),  # We don't want a positive constraint for b2
+        b3 ~ dnorm(0, 10), 
+        sigma ~ dunif(0, 50)
+    ), data = d
+)
+
+precis(model_fit_6)
+
+weight_seq = seq(from = -2.2, to = 2, length.out = 30)
+pred_dat = list(weight_s = weight_seq, 
+                weight_s2 = weight_seq^2, 
+                weight_s3 = weight_seq^3)
+mu = link(model_fit_6, data = pred_dat)
+mu_mean = apply(mu, 2, mean)
+mu_PI = apply(mu, 2, PI, prob = 0.89)
+sim_height = sim(model_fit_6, data = pred_dat)
+height_PI = apply(sim_height, 2, PI, prob = 0.89)
+
+
+plot(height ~ weight_s, d, col = col.alpha(rangi2, 0.5))
+lines(x = weight_seq, y = mu_mean)
+shade(mu_PI, weight_seq)
+shade(height_PI, weight_seq)
+
+# Turn off the horizontal axis
+plot(height ~ weight_s, d, col = col.alpha(rangi2, 0.5), xaxt = "n")
+
+at = c(-2, -1, 0, 1, 2)
+labels = at * sd(d$weight) + mean(d$weight)
+axis(side = 1, at = at, labels = round(labels, 1))

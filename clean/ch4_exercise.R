@@ -311,6 +311,17 @@ model_fit_3 = quap(
     ), data = d2
 )
 
+model_fit_3b = quap(
+    alist(
+        height ~ dnorm(mu, sigma),
+        mu <- a + b * (weight),
+        a ~ dnorm(178, 20),
+        b ~ dlnorm(0, 1),
+        sigma ~ dunif(0, 50)
+    ), data = d2
+)
+names(d2)
+
 model_fit_4 = quap(
     alist(
         height ~ dnorm(mu, sigma),
@@ -327,8 +338,16 @@ precis(model_fit_4)
 ## Covariance between parameters ----
 # View the covariances among the parameters with vcov
 round(vcov(model_fit_3), 3)
+round(vcov(model_fit_3b), 3)
 
 pairs(model_fit_3)
+pairs(model_fit_3b)
+
+diag(vcov(model_fit_3))
+cov2cor(vcov(model_fit_3))
+
+diag(vcov(model_fit_3b))
+cov2cor(vcov(model_fit_3b))
 
 ## Plot model fit ----
 plot(height ~ weight, data = d2, col = rangi2)
@@ -336,6 +355,12 @@ post = extract.samples(model_fit_3)
 a_map = mean(post$a)
 b_map = mean(post$b)
 curve(a_map + b_map * (x - xbar), add = TRUE)
+
+plot(height ~ weight, data = d2, col = rangi2)
+post = extract.samples(model_fit_3b)
+a_map = mean(post$a)
+b_map = mean(post$b)
+curve(a_map + b_map * (x), add = TRUE)
 
 post[1:5,]
 
@@ -518,6 +543,10 @@ shade(height_PI, weight_seq)
 
 # Define a cubic model ----
 # Pre-process any variable transformations so recalculation isn't required every iteration
+d = Howell1
+d %>% names()
+d$weight_s = (d$weight - mean(d$weight))/sd(d$weight)
+d$weight_s2 = d$weight_s^2
 d$weight_s3 = d$weight_s^3
 
 model_fit_6 = quap(
@@ -556,3 +585,114 @@ plot(height ~ weight_s, d, col = col.alpha(rangi2, 0.5), xaxt = "n")
 at = c(-2, -1, 0, 1, 2)
 labels = at * sd(d$weight) + mean(d$weight)
 axis(side = 1, at = at, labels = round(labels, 1))
+
+# Basis (B) Splines (Cherry Blossoms) ----
+data("cherry_blossoms")
+d = cherry_blossoms
+precis(d)
+plot(doy ~ year, d, col = col.alpha(rangi2, 0.5))
+
+d2 = d[complete.cases(d$doy), ] # complete cases on doy
+num_knots = 15
+knot_list = quantile(d2$year, probs = seq(0, 1, length.out = num_knots))
+
+knot_list
+
+library(splines)
+B = bs(d2$year,
+       knots = knot_list[-c(1, num_knots)],
+       degree = 3, intercept = TRUE)
+class(B)
+plot(NULL, xlim = range(d2$year), ylim = c(0,1), xlab = "year", ylab = "basis")
+for (i in 1:ncol(B)) lines(d2$year, B[, i])
+
+# B %*% w is equivalent to sapply(1:827, function(i) sum(B[i,] * w))
+model_fit_7 = quap(
+    alist(
+        D ~ dnorm(mu, sigma),
+        mu <- a + B %*% w,
+        a ~ dnorm(100, 10),
+        w ~ dnorm(0, 10),
+        sigma ~ dexp(1)
+    ), data = list(D = d2$doy, B = B),
+    start = list(w = rep(0, ncol(B)))
+)
+
+precis(model_fit_7, depth = 2)
+
+# Plot the posterior predictions
+post = extract.samples(model_fit_7)
+w = apply(post$w, 2, mean)
+plot(NULL, xlim = range(d2$year), ylim = c(-6, 6),
+     xlab = "year", ylab = "basis * weight")
+for (i in 1:ncol(B) ) lines(d2$year, w[i] * B[,i])
+
+mu = link(model_fit_7)
+mu_PI = apply(mu, 2, PI, 0.97)
+plot(d2$year, d2$doy, col = col.alpha(rangi2, 0.3), pch = 16)    
+shade(mu_PI, d2$year, col = col.alpha("black", 0.5))
+
+model_fit_7
+
+# 4H1 ----
+d = Howell1
+
+weight_seq = c(46.95, 43.72, 64.78, 32.59, 54.63)
+weight_s = (weight_seq - mean(d$weight))/sd(d$weight)
+
+model_fit_6@formula
+pred_dat = list(weight_s = weight_s, 
+                weight_s2 = weight_s^2, 
+                weight_s3 = weight_s^3)
+mu = link(model_fit_6, data = pred_dat)
+mu_mean = apply(mu, 2, mean)
+mu_PI = apply(mu, 2, PI, prob = 0.89)
+sim_height = sim(model_fit_6, data = pred_dat)
+height_PI = apply(sim_height, 2, PI, prob = 0.89)
+
+# 4H2 ----
+d2 <- d[d$age < 18, ]
+stopifnot(nrow(d2) == 192)
+plot(height ~ weight, d2)
+
+xbar = mean(d2$weight)
+
+linear_fit = quap(
+    alist(
+        height ~ dnorm(mu, sigma),
+        mu <- a + b * (weight - xbar),
+        a ~ dnorm(20, 20),
+        b ~ dlnorm(0, 1),
+        sigma ~ dunif(0, 50)
+    ), data = d2
+)
+
+
+precis(linear_fit)
+round(vcov(linear_fit), 3)
+
+pairs(linear_fit)
+
+diag(vcov(linear_fit))
+cov2cor(vcov(linear_fit))
+
+plot(height ~ weight, data = d2, col = rangi2)
+post = extract.samples(linear_fit)
+a_map = mean(post$a)
+b_map = mean(post$b)
+curve(a_map + b_map * (x - xbar), add = TRUE)
+
+# define a sequence of weights to compute predictions for
+weight_seq = seq(from = 1, to = 50, by = 1)
+length(weight_seq)
+
+# use line to compute mu for each sample from posterior
+mu = link(linear_fit, data = data.frame(weight = weight_seq))
+# 
+# mu_PI = PI(mu)
+# 
+# # draw HPDI region for line
+# shade(mu_PI, weight_seq)
+# 
+# # draw PI region for simulated heights
+# shade(height_PI, weight_seq)

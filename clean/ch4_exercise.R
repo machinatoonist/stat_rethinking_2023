@@ -696,3 +696,63 @@ mu = link(linear_fit, data = data.frame(weight = weight_seq))
 # 
 # # draw PI region for simulated heights
 # shade(height_PI, weight_seq)
+
+# 4H3 ----
+d = Howell1
+dim(d)
+glimpse(d)
+d$weight_l = log(d$weight)
+plot(height ~ weight_l, data = d)
+
+xbar_l = mean(d$weight_l)
+
+log_linear_fit = quap(
+    alist(
+        height ~ dnorm(mu, sigma),
+        mu <- a + b * (weight_l - xbar_l),
+        a ~ dnorm(20, 20),
+        b ~ dlnorm(0, 1),
+        sigma ~ dunif(0, 50)
+    ), data = d
+)
+
+precis(log_linear_fit)
+round(vcov(log_linear_fit), 3)
+
+plot(height ~ weight_l, data = d, col = rangi2)
+post = extract.samples(log_linear_fit)
+a_map = mean(post$a)
+b_map = mean(post$b)
+curve(a_map + b_map * (x - xbar_l), add = TRUE)
+
+# define a sequence of weights to compute predictions for
+(min_weight = min(d$weight))
+(max_weight = max(d$weight))
+
+weight_seq = seq(from = 2, to = 70, by = 1)
+weight_seq_l = log(weight_seq)
+
+# use line to compute mu for each samples from posterior
+# and for each weight in weight_seq
+mu = link(log_linear_fit, data = data.frame(weight_l = weight_seq_l))
+str(mu)
+
+# summarise the distribution of mu
+mu_mean = apply(mu, 2, mean)
+mu_PI = apply(mu, 2, PI, prob = 0.89)
+
+# plot the raw data
+# fade out points to make line and interval for visible
+plot(height ~ weight_l, data = d, col = col.alpha(rangi2, 0.5))
+
+# plot the MAP line, aka the mean mu for each weight
+lines(weight_seq_l, mu_mean)
+
+# plot the 89% PI
+shade(mu_PI, weight_seq_l)
+
+sim_height = sim(log_linear_fit, data = list(weight_l = weight_seq_l))
+height_PI = apply(sim_height, 2, PI, prob = 0.89)
+
+shade(height_PI, weight_seq_l)
+

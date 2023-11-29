@@ -765,6 +765,53 @@ model_fit_5_8_d = quap(
 precis(model_fit_5_8_d, depth = 2)
 
 # > Expected difference in the height of females and males ----
+# This is called a CONTRAST.
 post = extract.samples(model_fit_5_8)
 post$diff_fm = post$a[,1] - post$a[,2]
 precis(post, depth = 2)
+
+# Many categories ----
+data("milk")
+d = milk
+levels(d$clade)
+d$clade_id = as.integer(d$clade)
+str(d)
+
+# Use a model to measure the average milk energy in each clade
+d$K = standardize(d$kcal.per.g)
+str(d)
+
+model_fit_5_9 = quap(
+    alist(
+        K ~ dnorm(mu, sigma),
+        mu <- a[clade_id],
+        a[clade_id] ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ), data = d
+)
+
+precis(model_fit_5_9, depth = 2)
+
+labels = paste0("a[", 1:4, "]:", levels(d$clade))
+labels = paste("a[", 1:4, "]:", levels(d$clade), sep = "")
+
+
+plot(precis(model_fit_5_9, depth = 2, pars = "a"), labels = labels,
+     xlab = "expected kcal (std)")
+
+set.seed(63)
+d$house = sample(rep(1:4, each = 8), size = nrow(d))
+str(d)
+
+# Include this randomly assigned categorical variable in a new model
+model_fit_5_10 = quap(
+    alist(
+        K ~ dnorm(mu, sigma),
+        mu <- a[clade_id] + b[house],
+        a[clade_id] ~ dnorm(0, 0.5),
+        b[house] ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ), data = d
+)
+
+precis(model_fit_5_10, depth = 2)

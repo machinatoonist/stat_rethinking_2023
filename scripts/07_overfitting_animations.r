@@ -384,39 +384,64 @@ N <- 100
 # simulate initial heights
 h0 <- rnorm(N,10,2)
 # assign treatments and simulate fungus and growth
-treatment <- rep( 0:1 , each=N/2 )
-fungus <- rbinom( N , size=1 , prob=0.5 - treatment*0.4 )
-h1 <- h0 + rnorm(N, 5 - 3*fungus)
+treatment <- rep(0:1 , each = N / 2)
+fungus <- rbinom(N , size = 1 , prob = 0.5 - treatment * 0.4)
+h1 <- h0 + rnorm(N, 5 - 3 * fungus)
 # compose a clean data frame
-d <- data.frame( h0=h0 , h1=h1 , treatment=treatment , fungus=fungus )
+d <-
+    data.frame(
+        h0 = h0 ,
+        h1 = h1 ,
+        treatment = treatment ,
+        fungus = fungus
+    )
 
-plot( jitter(d$fungus) , d$h1/d$h0 , col=ifelse(d$treatment==1,2,4) , lwd=3 , xaxt="n" , xlab="" , ylab="growth" )
-axis( 1 , at=c(0,1) , labels=c("no fungus","yo fungus") )
+plot(
+    jitter(d$fungus) ,
+    d$h1 / d$h0 ,
+    col = ifelse(d$treatment == 1, 2, 4) ,
+    lwd = 3 ,
+    xaxt = "n" ,
+    xlab = "" ,
+    ylab = "growth"
+)
+axis(1 ,
+     at = c(0, 1) ,
+     labels = c("no fungus", "yo fungus"))
 
-plot( jitter(d$treatment) , d$h1/d$h0 , col=ifelse(d$fungus==1,2,4) , lwd=3 , xaxt="n" , xlab="" , ylab="growth" )
-axis( 1 , at=c(0,1) , labels=c("control","treatment") )
+plot(
+    jitter(d$treatment) ,
+    d$h1 / d$h0 ,
+    col = ifelse(d$fungus == 1, 2, 4) ,
+    lwd = 3 ,
+    xaxt = "n" ,
+    xlab = "" ,
+    ylab = "growth"
+)
+axis(1 ,
+     at = c(0, 1) ,
+     labels = c("control", "treatment"))
 
-abline(lm( I(d$h1/d$h0)[d$fungus==1] ~ treatment[d$fungus==1] ))
-abline(lm( I(d$h1/d$h0)[d$fungus==0] ~ treatment[d$fungus==0] ))
+abline(lm(I(d$h1 / d$h0)[d$fungus == 1] ~ treatment[d$fungus == 1]))
+abline(lm(I(d$h1 / d$h0)[d$fungus == 0] ~ treatment[d$fungus == 0]))
 
-m6.6 <- quap(
-    alist(
-        h1 ~ dnorm( mu , sigma ),
-        mu <- h0*p,
-        p ~ dlnorm( 0 , 0.25 ),
-        sigma ~ dexp( 1 )
-    ), data=d )
+m6.6 <- quap(alist(h1 ~ dnorm(mu , sigma),
+                   mu <- h0 * p,
+                   p ~ dlnorm(0 , 0.25),
+                   sigma ~ dexp(1)), data = d)
 
 m6.7 <- quap(
     alist(
-        h1 ~ dnorm( mu , sigma ),
+        h1 ~ dnorm(mu , sigma),
         mu <- h0 * p,
-        p <- a + bt*treatment + bf*fungus,
-        a ~ dlnorm( 0 , 0.2 ) ,
-        bt ~ dnorm( 0 , 0.5 ),
-        bf ~ dnorm( 0 , 0.5 ),
-        sigma ~ dexp( 1 )
-    ), data=d )
+        p <- a + bt * treatment + bf * fungus,
+        a ~ dlnorm(0 , 0.2) ,
+        bt ~ dnorm(0 , 0.5),
+        bf ~ dnorm(0 , 0.5),
+        sigma ~ dexp(1)
+    ),
+    data = d
+)
 
 m6.8 <- quap(
     alist(

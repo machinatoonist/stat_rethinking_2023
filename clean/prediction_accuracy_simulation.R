@@ -13,7 +13,7 @@ library(ggplot2)
 N = 1000
 mu_a = 100
 bias = 0.05
-rand_error = 0.05
+rand_error = 0.08
 a = rnorm(N, mu_a, 1)  # actuals
 t1 = rep(0:1, each = N/2)  # flag to indicate the presence of a treatment causing over estimates
 t1b = a * t1 * bias # Bias introduced for over estimation if treatment is present
@@ -29,12 +29,10 @@ sim_df = tibble(
     forecast = f1b,
     actual = a,
     error = f1b - a
-) 
-
-plot_df = sim_df %>% 
+) %>% 
     mutate(treatment = factor(treatment, 
-                           levels = c(0, 1), 
-                           labels = c("No", "Yes")))
+                              levels = c(0, 1), 
+                              labels = c("No", "Yes")))
 
 sim_df %>% 
     count(treatment)
@@ -84,7 +82,7 @@ print(paste0("Random Error: ", rand_error * 100, "%"))
 N = 3000
 mu_a = 100
 bias = 0.05
-rand_error = 0.05
+rand_error = 0.08
 a = rnorm(N, mu_a, 1)  # actuals
 
 # Treatment flags
@@ -105,7 +103,6 @@ sim_df = tibble(
     actual = a,
     error = f1b - a
 )
-
 
 sim_df %>% 
     count(treatment)
@@ -145,3 +142,136 @@ mf = quap(
 precis(mf, depth = 2)
 
 
+# rstanarm verion ----
+library(rstanarm)
+library(tidybayes)
+
+# Convert to rstanarm model
+mf_stanarm <- stan_glmer(
+    error ~ 1 + (1 | treatment),
+    data = sim_df,
+    prior = normal(0, 1),
+    prior_intercept = normal(0, 1),
+    prior_aux = exponential(1),
+    chains = 4, 
+    control = list(adapt_delta = 0.95),
+    iter = 4000,
+    cores = 4
+)
+
+# Print the summary of the model
+print(summary(mf_stanarm))
+
+# Summarise model with tidybayes ----
+# See https://mjskay.github.io/tidybayes/articles/tidy-rstanarm.html
+get_variables(mf_stanarm)
+
+mf_stanarm %>%
+    spread_draws(`b[(Intercept) treatment:Over_forecast]`) %>%
+    rename(over_fcst_b = `b[(Intercept) treatment:Over_forecast]`) %>% 
+    summarise(mean = mean(over_fcst_b),
+              sd = sd(over_fcst_b),
+              q10 = quantile(over_fcst_b, probs = 0.1),
+              q90 = quantile(over_fcst_b, probs = 0.9))
+
+mf_stanarm %>% 
+    spread_draws(b[,(Intercept)]) %>%
+    separate("(Intercept)", c("(Intercept)", "treatment"), ":") %>%
+    head(10)
+
+mf_stanarm %>% 
+    spread_draws(b[,(Intercept)]) %>%
+    separate("(Intercept)", c("(Intercept)", "treatment"), ":") %>%
+    group_by(treatment) %>% 
+    summarise(mean = mean(b),
+              sd = sd(b),
+              q10 = quantile(b, probs = 0.1),
+              q90 = quantile(b, probs = 0.9))
+
+mf_stanarm %>%
+    spread_draws(`(Intercept)`, sigma) %>%
+    head(10)
+
+mf_stanarm %>%
+    spread_draws(`(Intercept)`, sigma) %>%
+    median_qi(`(Intercept)`, sigma)
+
+mf_stanarm %>%
+    spread_draws(b[,treatment]) %>%
+    median_qi()
+
+mf_stanarm %>%
+    spread_draws(b[,treatment]) %>%
+    summarise_draws()
+
+mf_stanarm %>% 
+    spread_draws(`(Intercept)`, b[,treatment]) %>%
+    head(10)
+
+mf_stanarm %>%
+    spread_draws(`(Intercept)`, b[,treatment]) %>%
+    mutate(condition_mean = `(Intercept)` + b) %>%
+    median_qi(condition_mean)
+
+# > Plot intervals ----
+mf_stanarm %>%
+    spread_draws(`(Intercept)`, b[,treatment]) %>%
+    median_qi(condition_mean = `(Intercept)` + b, .width = c(.95, .66)) %>%
+    ggplot(aes(y = treatment, x = condition_mean, xmin = .lower, xmax = .upper)) +
+    geom_pointinterval()
+
+mf_stanarm %>%
+    spread_draws(`(Intercept)`, b[,treatment]) %>%
+    mutate(condition_mean = `(Intercept)` + b) %>%
+    ggplot(aes(y = treatment, x = condition_mean)) +
+    stat_halfeye()
+
+mf_stanarm %>%
+    spread_draws(`(Intercept)`, b[,treatment]) %>%
+    mutate(condition_mean = `(Intercept)` + b) %>%
+    ggplot(aes(y = treatment, x = condition_mean, fill = after_stat(abs(x) < .8))) +
+    stat_halfeye() +
+    geom_vline(xintercept = c(-.8, .8), linetype = "dashed") +
+    scale_fill_manual(values = c("gray80", "skyblue"))
+
+# > Posterior means and predictions ----
+sim_df %>%
+    data_grid(treatment) %>%
+    add_epred_draws(mf_stanarm) %>%
+    head(10)
+
+sim_df %>%
+    data_grid(treatment) %>%
+    add_epred_draws(mf_stanarm) %>%
+    ggplot(aes(x = .epred, y = treatment)) +
+    stat_pointinterval(.width = c(.66, .95))
+
+# Quantile dotplots ----
+sim_df %>%
+    data_grid(treatment) %>%
+    add_epred_draws(mf_stanarm) %>%
+    ggplot(aes(x = .epred, y = treatment)) +
+    stat_dotsinterval(quantiles = 100)
+
+# Posterior predictions ----
+# Where add_epred_draws() is analogous to rstanarm::posterior_epred(), 
+# add_predicted_draws() is analogous to rstanarm::posterior_predict(), 
+# giving draws from the posterior predictive distribution.
+grid = sim_df %>%
+    data_grid(treatment)
+
+means = grid %>%
+    add_epred_draws(mf_stanarm)
+
+preds = grid %>%
+    add_predicted_draws(mf_stanarm)
+
+sim_df %>%
+    ggplot(aes(y = treatment, x = error)) +
+    stat_interval(aes(x = .prediction), data = preds) +
+    stat_pointinterval(aes(x = .epred), 
+                       data = means, 
+                       .width = c(.66, .95), 
+                       position = position_nudge(y = -0.3)) +
+    geom_point() +
+    scale_color_brewer()

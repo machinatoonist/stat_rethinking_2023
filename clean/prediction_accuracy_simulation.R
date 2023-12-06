@@ -246,14 +246,14 @@ sim_df %>%
     ggplot(aes(x = .epred, y = treatment)) +
     stat_pointinterval(.width = c(.66, .95))
 
-# Quantile dotplots ----
+# > Quantile dotplots ----
 sim_df %>%
     data_grid(treatment) %>%
     add_epred_draws(mf_stanarm) %>%
     ggplot(aes(x = .epred, y = treatment)) +
     stat_dotsinterval(quantiles = 100)
 
-# Posterior predictions ----
+# > Posterior predictions ----
 # Where add_epred_draws() is analogous to rstanarm::posterior_epred(), 
 # add_predicted_draws() is analogous to rstanarm::posterior_predict(), 
 # giving draws from the posterior predictive distribution.

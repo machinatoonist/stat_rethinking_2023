@@ -235,6 +235,7 @@ m6.8 = quap(
 # causal effect of treatment.  Including post treatment variables can actually
 # mask the treatment itself.
 
+# Fungus and d-separation ----
 # That including fungus zeros the coefficient for treatment suggests that
 # treatment works for exactly the anticipated reasons.
 # Inference about the treatment depends on removing the post-treatment variable.
@@ -256,3 +257,341 @@ drawdag(plant_dag)
 # Once we know F, learning T provides no additional information about H1.
 impliedConditionalIndependencies(plant_dag)
 # H_1 is independent of T given F
+
+# Create a data set with a common cause of H1 (final plant height) and fungus (F)
+set.seed(71)
+N = 1000
+h0 = rnorm(N, 10, 2)
+treatment = rep(0:1, each = N/2)
+M = rbern(N)
+# Moisture increases chance of fungus.
+# Treatment reduces change of fungus.
+fungus = rbinom(N, size = 1, prob = 0.5 - treatment * 0.4 + 0.4 * M)
+# Final plant height
+h1 = h0 + rnorm(N, 5 + 3 * M)
+d2 = data.frame(h0 = h0, h1 = h1, treatment = treatment, fungus = fungus)
+d2 %>% glimpse()
+
+# > Refit the models ----
+
+m6.6d <- quap(
+    alist(
+        h1 ~ dnorm(mu, sigma),
+        mu <- h0 * p,
+        p ~ dlnorm(0, 0.25),
+        sigma ~ dexp(1)
+    ), data = d2)
+
+precis(m6.6d)
+
+m6.7d <- quap(
+    alist(
+        h1 ~ dnorm(mu, sigma),
+        mu <- h0 * p,
+        p <- a + bt * treatment + bf * fungus,
+        a ~ dlnorm(0, 0.2),
+        bt ~ dnorm(0, 0.5),
+        bf ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ), data = d2
+)
+
+# Compare new fit with previous
+precis(m6.7)
+plot(precis(m6.7))
+
+# Now it looks like fungus is positively effecting growth
+precis(m6.7d)
+plot(precis(m6.7d))
+
+# To answer the question: What is the impact of treatment on growth?
+# We must omit the post-treatment variable fungus.
+m6.8d = quap(
+    alist(
+        h1 ~ dnorm(mu, sigma),
+        mu <- h0 * p,
+        p <- a + bt * treatment,
+        a ~ dlnorm(0, 0.2),
+        bt ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ), data = d2
+)
+
+# Removing fungus from the model previously demonstrated that treatment 
+# has a positive effect on growth
+precis(m6.8)
+plot(m6.8)
+
+# With the latent common cause of fungus and H1 this effect disappears
+precis(m6.8d)
+plot(m6.8d)
+
+# Collider Bias ----
+d <- sim_happiness(seed = 1977, N_years = 1000)
+precis(d)
+d %>% glimpse()
+
+d2 = d[d$age > 17, ] # Filter only adults
+d2$A = (d2$age - 18)/(65 - 18) # Rescale age so that the range from 18 to 65 is one unit
+
+precis(d2)
+
+# Construct the marriage status index variable
+d2$mid = d2$married + 1
+d2 %>% glimpse()
+m6.9 = quap(
+    alist(
+        happiness ~ dnorm(mu, sigma),
+        mu <- a[mid] + bA * A,
+        a[mid] ~ dnorm(0, 1),
+        bA ~ dnorm(0, 2),
+        sigma ~ dexp(1)
+    ), data = d2
+)
+# Age is negatively correlated with happiness! But the simulated data had no
+# such relationship.  What went wrong?
+
+precis(m6.9, depth = 2)
+
+# Compare the inferences from this model with a model that omits marriage status
+m6.10 = quap(
+    alist(
+        happiness ~ dnorm(mu, sigma),
+        mu <- a + bA * A,
+        a ~ dnorm(0, 1),
+        bA ~ dnorm(0, 2),
+        sigma ~ dexp(1)
+    ), data = d2
+)
+
+# Now there is no relationship between age and happiness
+precis(m6.10)
+
+# When we condition on a collider such as marriage this is exactly what we 
+# should expect.  Age and happiness independently influence marriage.  When
+# we condition on marriage we induce a spurious association between age and 
+# happiness.
+
+# > Haunted DAG ----
+# Simulate the effect of Grandparents (G) and Parents (P) on the educational
+# achievement of their children (C)
+# P is some function of G and U
+# C is some function of G, P and U
+# G and U are not functions of any other known variables
+
+N <- 200
+# Define some arbitrary strength of association
+b_GP = 1 # direct effect of G on P
+b_GC = 0 # direct effect of G on C
+b_PC = 1 # direct effect of P on C
+b_U = 2 # direct effect of the neighbourhood (U) on P and C
+
+# Use these slopes to draw random conclusions
+set.seed(1)
+U <- 2 * rbern(N, 0.5) - 1
+G <- rnorm(N)
+P <- rnorm(N, b_GP * G + b_U * U)
+C <- rnorm(N, b_PC * P + b_GC * G + b_U * U)
+d <- data.frame(C = C, P = P, G = G, U = U)
+
+d %>% glimpse()
+
+m6.11 = quap(
+    alist(
+        C ~ dnorm(mu, sigma),
+        mu <- a + b_PC * P + b_GC * G,
+        a ~ dnorm(0, 1),
+        c(b_PC, b_GC) ~ dnorm(0, 1),
+        sigma ~ dexp(1)
+    ), data = d
+)
+precis(m6.11)
+
+
+# The latent variable U is a collider on P.  Once we know P, learning G
+# invisibly tells us about the neighbourhood U, and U is associated with the
+# outcome C.  Conditioning on P produces collider bias so we have to measure
+# U.
+
+m6.12 = quap(
+    alist(
+        C ~ dnorm(mu, sigma),
+        mu <- a + b_PC * P + b_GC * G + b_U * U,
+        a ~ dnorm(0, 1),
+        c(b_PC, b_GC, b_U) ~ dnorm(0, 1),
+        sigma ~ dexp(1)
+    ), data = d
+)
+
+# Conditioning on U, P and G extracts this original slopes used in the simulation
+precis(m6.12)
+
+# > Adjustment sets ----
+library(dagitty)
+dag6.1 = dagitty("dag {
+                 U [unobserved]
+                 X -> Y
+                 X <- U <- A -> C -> Y
+                 U -> B <- C 
+                 }")
+
+adjustmentSets(dag6.1, exposure = "X", outcome = "Y")
+
+# We want to measure the total causal effects of the number of Waffle Houses
+# divorce rate in each State.  Find the minimum adjustment set that will 
+# block backdoor paths from Waffle House to divorce.
+dag6.2 = dagitty("dag {
+                 A -> D
+                 A -> M -> D
+                 A <- S -> M
+                 S -> W -> D
+                 }")
+
+# Find the elemental confounds
+adjustmentSets(dag6.2, exposure = "W", outcome = "D")
+
+# Find conditional independencies
+impliedConditionalIndependencies(dag6.2)
+
+# End of chapter practice ----
+# > 6M1 ----
+library(ggdag)
+dag_coords <- tibble(name = c("X", "U", "A", "B", "C", "Y", "V"),
+                     x = c(1, 1, 2, 2, 3, 3, 3.5),
+                     y = c(1, 2, 2, 1.5, 2, 1, 1.5))
+
+dagify(Y ~ X + C + V,
+       X ~ U,
+       U ~ A,
+       B ~ U + C,
+       C ~ A + V,
+       coords = dag_coords) %>%
+    ggplot(aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_dag_point(data = . %>% filter(name %in% c("U", "V")),
+                   shape = 1, stroke = 2, color = "black") +
+    geom_dag_text(color = "black", size = 10) +
+    geom_dag_edges(edge_color = "black", edge_width = 2,
+                   arrow_directed = grid::arrow(length = grid::unit(15, "pt"),
+                                                type = "closed")) +
+    theme_void()
+
+# B and C are colliders so conditioning on these will open the path
+new_dag <- dagitty("dag { U [unobserved]
+                          V [unobserved]
+                          X -> Y
+                          X <- U <- A -> C -> Y
+                          U -> B <- C
+                          C <- V -> Y }")
+
+adjustmentSets(new_dag, exposure = "X", outcome = "Y")
+
+# > 6M2 ----
+set.seed(1984)
+
+n <- 1000
+dat <- tibble(x = rnorm(n)) %>%
+    mutate(z = rnorm(n, mean = x, sd = 0.1),
+           y = rnorm(n, mean = z)
+           ,across(everything(), standardize)
+           )
+
+dat %>% glimpse()
+sim_cor <- cor(dat$x, dat$z)
+sim_cor
+
+b6m2.1 = quap(
+    alist(
+        y ~ dnorm(mu, sigma),
+        mu <- a + b_x * x + b_z * z,
+        a ~ dnorm(0, 0.2),
+        b_x ~ dnorm(0, 0.5),
+        b_z ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ), data = dat
+)
+
+precis(b6m2.1)
+
+b6m2 <- brm(y ~ 1 + x + z, data = dat, family = gaussian,
+            prior = c(prior(normal(0, 0.2), class = Intercept),
+                      prior(normal(0, 0.5), class = b),
+                      prior(exponential(1), class = sigma)),
+            iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+            file = here("fits", "chp6", "b6m2"))
+
+as_draws_df(b6m2) %>%
+    as_tibble() %>% 
+    select(b_Intercept, b_x, b_z, sigma) %>%
+    pivot_longer(everything()) %>%
+    ggplot(aes(x = value, y = name)) +
+    stat_halfeye(.width = c(0.67, 0.89, 0.97))
+
+# > 6M3 ----
+# What do we need to control for to measure the total causal influence of X on Y
+dag1 <- dagitty("dag{ X <- Z <- A -> Y <- X; Y <- Z }")
+adjustmentSets(dag1, exposure = "X", outcome = "Y")
+
+dag2 <- dagitty("dag{ X -> Z <- A -> Y <- X; X -> Z -> Y }")
+adjustmentSets(dag2, exposure = "X", outcome = "Y")
+
+dag3 <- dagitty("dag{ X <- A -> Z <- Y; X -> Z <- Y}")
+adjustmentSets(dag3, exposure = "X", outcome = "Y")
+
+
+dag4 <- dagitty("dag{ X <- A -> Z -> Y; X -> Z -> Y; X -> Y}")
+adjustmentSets(dag4, exposure = "X", outcome = "Y")
+
+# > 6H1 ----
+waffle_dag <- dagitty("dag { S -> W -> D <- A <- S -> M -> D; A -> M }")
+coordinates(waffle_dag) <- list(x = c(A = 1, S = 1, M = 2, W = 3, D = 3),
+                                y = c(A = 1, S = 3, M = 2, W = 3, D = 1))
+
+ggplot(waffle_dag, aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_dag_text(color = "black", size = 10) +
+    geom_dag_edges(edge_color = "black", edge_width = 2,
+                   arrow_directed = grid::arrow(length = grid::unit(15, "pt"),
+                                                type = "closed")) +
+    theme_void()
+
+adjustmentSets(waffle_dag, exposure = "W", outcome = "D")
+
+data("WaffleDivorce")
+d = WaffleDivorce
+d %>% glimpse()
+d$W = standardize(d$WaffleHouses)
+d$S = factor(d$Location)
+
+m6h1.1 = quap(
+    alist(
+        W ~ dnorm(mu, sigma),
+        mu <- a + b_W[S] * W,
+        b_W[S] ~ dnorm(0, .5),
+        sigma ~ dexp(1)
+    ), data = d
+)
+
+precis(m6h1.1, depth = 2)
+
+plot(precis(m6h1.1, depth = 2))
+
+waffle <- WaffleDivorce %>%
+    as_tibble() %>%
+    select(D = Divorce,
+           A = MedianAgeMarriage,
+           M = Marriage,
+           S = South,
+           W = WaffleHouses) %>%
+    mutate(across(-S, standardize),
+           S = factor(S))
+
+waff_mod <- brm(D ~ 1 + W + S, data = waffle, family = gaussian,
+                prior = c(prior(normal(0, 0.2), class = Intercept),
+                          prior(normal(0, 0.5), class = b),
+                          prior(exponential(1), class = sigma)),
+                iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+                file = here("fits", "chp6", "b6h1"))
+
+spread_draws(waff_mod, b_W) %>%
+    ggplot(aes(x = b_W)) +
+    stat_halfeye(.width = c(0.67, 0.89, 0.97)) +
+    labs(x = expression(beta[W]), y = "Density")

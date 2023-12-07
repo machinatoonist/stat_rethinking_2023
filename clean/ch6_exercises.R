@@ -1,6 +1,11 @@
 library(rethinking)
 library(dagitty)
 
+# References ----
+# https://sr2-solutions.wjakethompson.com/causes-confounds-colliders
+# https://bookdown.org/content/4857/the-haunted-dag-the-causal-terror.html#summary-and-a-little-more-practice
+
+
 # Simulate Berkson's Paradox ----
 # The correlation of two variables that are independent and causally
 # related to an outcome that involves selection, such as grant proposals.
@@ -542,6 +547,7 @@ dag4 <- dagitty("dag{ X <- A -> Z -> Y; X -> Z -> Y; X -> Y}")
 adjustmentSets(dag4, exposure = "X", outcome = "Y")
 
 # > 6H1 ----
+# Find the total causal effect of Waffle Houses on divorce rate
 waffle_dag <- dagitty("dag { S -> W -> D <- A <- S -> M -> D; A -> M }")
 coordinates(waffle_dag) <- list(x = c(A = 1, S = 1, M = 2, W = 3, D = 3),
                                 y = c(A = 1, S = 3, M = 2, W = 3, D = 1))
@@ -595,3 +601,229 @@ spread_draws(waff_mod, b_W) %>%
     ggplot(aes(x = b_W)) +
     stat_halfeye(.width = c(0.67, 0.89, 0.97)) +
     labs(x = expression(beta[W]), y = "Density")
+
+# > 6H2 ----
+
+impliedConditionalIndependencies(waffle_dag)
+
+# Test the conditional independencies implied by the causal dag
+waff_ci1 <- brm(A ~ 1 + W + S, data = waffle, family = gaussian,
+                prior = c(prior(normal(0, 0.2), class = Intercept),
+                          prior(normal(0, 0.5), class = b),
+                          prior(exponential(1), class = sigma)),
+                iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+                file = here("fits", "chp6", "b6h2-1"))
+
+summary(waff_ci1)
+
+waff_ci2 <- brm(D ~ 1 + S + A + M + W, data = waffle, family = gaussian,
+                prior = c(prior(normal(0, 0.2), class = Intercept),
+                          prior(normal(0, 0.5), class = b),
+                          prior(exponential(1), class = sigma)),
+                iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+                file = here("fits", "chp6", "b6h2-2"))
+
+summary(waff_ci2)
+
+waff_ci3 <- brm(M ~ 1 + W + S, data = waffle, family = gaussian,
+                prior = c(prior(normal(0, 0.2), class = Intercept),
+                          prior(normal(0, 0.5), class = b),
+                          prior(exponential(1), class = sigma)),
+                iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+                file = here("fits", "chp6", "b6h2-3"))
+
+summary(waff_ci3)
+
+lbls <- c(expression("Model 1:"~beta[W]),
+          expression("Model 2:"~beta[S]),
+          expression("Model 3:"~beta[W]))
+
+bind_rows(
+    gather_draws(waff_ci1, b_W) %>%
+        ungroup() %>%
+        mutate(model = "ICI 1"),
+    gather_draws(waff_ci2, b_S1) %>%
+        ungroup() %>%
+        mutate(model = "ICI 2"),
+    gather_draws(waff_ci3, b_W) %>%
+        ungroup() %>%
+        mutate(model = "ICI 3")
+) %>%
+    ggplot(aes(x = .value, y = model)) +
+    stat_halfeye(.width = c(0.67, 0.89, 0.97)) +
+    scale_y_discrete(labels = lbls) +
+    labs(x = "Parameter Estimate", y = "Implied Conditional Independency")
+
+
+# From Solomon
+formula <- c("A ~ 1 + W + S", 
+             "D ~ 1 + S + A + M + W", 
+             "M ~ 1 + W + S")
+
+# Highlight model with more uncertainty about the effect of Waffle Houses
+tibble(fit = str_c("waff_ci", 1:3)) %>% 
+    mutate(y    = str_c(fit, " (", formula, ")"),
+           post = purrr::map(fit, ~ get(.) %>% 
+                                 as_draws_df() %>% 
+                                 select(b_W))) %>% 
+    unnest(post) %>% 
+    
+    ggplot(aes(x = b_W, y = y, color = fit %in% c("waff_ci2"))) +
+    stat_pointinterval(.width = .95) +
+    scale_color_manual(values = c("grey50", "forestgreen")) +
+    labs(x = expression(beta[w]),
+         y = NULL) +
+    coord_cartesian(xlim = c(-0.4, 0.6)) +
+    theme(axis.text.y = element_text(hjust = 0),
+          legend.position = "none")
+
+
+# > 6H3 ----
+data(foxes)
+
+fox_dat <- foxes %>%
+    as_tibble() %>%
+    select(area, avgfood, weight, groupsize) %>%
+    mutate(across(everything(), standardize))
+
+fox_dat
+
+fox_dag <- dagitty("dag{ area -> avgfood -> groupsize -> weight <- avgfood }")
+
+coordinates(fox_dag) <- list(x = c(area = 2, avgfood = 1, groupsize = 3, weight = 2),
+                               y = c(area = 0, avgfood = 1, groupsize = 1, weight = 2)
+)
+
+drawdag(fox_dag)
+
+adjustmentSets(fox_dag, exposure = "area", outcome = "weight")
+
+set.seed(271728)
+
+# prior predictive simulations 
+n <- 1000
+
+tibble(group = seq_len(n),
+       alpha = rnorm(n, 0, 0.2),
+       beta = rnorm(n, 0, 0.5)) %>%
+    expand(nesting(group, alpha, beta),
+           area = seq(from = -2, to = 2, length.out = 100)) %>%
+    mutate(weight = alpha + beta * area) %>%
+    ggplot(aes(x = area, y = weight, group = group)) +
+    geom_line(alpha = 1 / 10) +
+    geom_hline(yintercept = c((0 - mean(foxes$weight)) / sd(foxes$weight),
+                              (max(foxes$weight) - mean(foxes$weight)) /
+                                  sd(foxes$weight)),
+               linetype = c("dashed", "solid"), color = "red") +
+    annotate(geom = "text", x = -2, y = -3.83, hjust = 0, vjust = 1,
+             label = "No weight") +
+    annotate(geom = "text", x = -2, y = 2.55, hjust = 0, vjust = 0,
+             label = "Maximum weight") +
+    expand_limits(y = c(-4, 4)) +
+    labs(x = "Standardized Area", y = "Standardized Weight")
+
+# Fit model
+area_mod <- brm(weight ~ 1 + area, data = fox_dat, family = gaussian,
+                prior = c(prior(normal(0, 0.2), class = Intercept),
+                          prior(normal(0, 0.5), class = b,),
+                          prior(exponential(1), class = sigma)),
+                iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+                file = here("fits", "chp6", "b6h3"))
+
+# Area has little influence on weight
+as_draws_df(area_mod) %>%
+    as_tibble() %>%
+    select(b_Intercept, b_area, sigma) %>%
+    pivot_longer(everything()) %>%
+    mutate(name = factor(name, levels = c("b_Intercept", "b_area", "sigma"))) %>%
+    ggplot(aes(x = value, y = fct_rev(name))) +
+    stat_halfeye(.width = c(0.67, 0.89, 0.97)) +
+    labs(x = "Parameter Estimate", y = "Parameter")
+
+# > 6H4 ----
+adjustmentSets(fox_dag, exposure = "avgfood", outcome = "weight")
+
+food_mod <- brm(weight ~ 1 + avgfood, data = fox_dat, family = gaussian,
+                prior = c(prior(normal(0, 0.2), class = Intercept),
+                          prior(normal(0, 0.5), class = b,),
+                          prior(exponential(1), class = sigma)),
+                iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+                file = here("fits", "chp6", "b6h4"))
+
+as_draws_df(food_mod) %>%
+    as_tibble() %>%
+    select(b_Intercept, b_avgfood, sigma) %>%
+    pivot_longer(everything()) %>%
+    mutate(name = factor(name, levels = c("b_Intercept", "b_avgfood", "sigma"))) %>%
+    ggplot(aes(x = value, y = fct_rev(name))) +
+    stat_halfeye(.width = c(0.67, 0.89, 0.97)) +
+    labs(x = "Parameter Estimate", y = "Parameter")
+
+# > 6H5 ----
+adjustmentSets(fox_dag, exposure = "groupsize", outcome = "weight")
+
+grp_mod <- brm(weight ~ 1 + avgfood + groupsize, data = fox_dat,
+               family = gaussian,
+               prior = c(prior(normal(0, 0.2), class = Intercept),
+                         prior(normal(0, 0.5), class = b,),
+                         prior(exponential(1), class = sigma)),
+               iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+               file = here("fits", "chp6", "b6h5"))
+
+as_draws_df(grp_mod) %>%
+    as_tibble() %>%
+    select(b_Intercept, b_avgfood, b_groupsize, sigma) %>%
+    pivot_longer(everything()) %>%
+    mutate(name = factor(name, levels = c("b_Intercept", "b_avgfood",
+                                          "b_groupsize", "sigma"))) %>%
+    ggplot(aes(x = value, y = fct_rev(name))) +
+    stat_halfeye(.width = c(0.67, 0.89, 0.97)) +
+    labs(x = "Parameter Estimate", y = "Parameter")
+
+# > 6H6 ----
+ed_dag <- dagitty("dag { D -> I -> P <- K }")
+coordinates(ed_dag) <- list(x = c(D = 1, I = 1.5, P = 2, K = 2.5),
+                            y = c(D = 3, I = 2, P = 1, K = 2))
+
+ggplot(ed_dag, aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_dag_text(color = "black", size = 10) +
+    geom_dag_edges(edge_color = "black", edge_width = 2,
+                   arrow_directed = grid::arrow(length = grid::unit(15, "pt"),
+                                                type = "closed")) +
+    theme_void()
+
+# Testable implications
+impliedConditionalIndependencies(ed_dag)
+
+# No control sets are required.  Including I would introduce post
+# treatment bias
+
+# > 6H7 ----
+adjustmentSets(ed_dag, exposure = "D", outcome = "P")
+
+set.seed(2010)
+
+students <- 500
+
+ed_dat <- tibble(k = rnorm(students, mean = 0, sd = 2),
+                 d = sample(0L:1L, students, replace = TRUE),
+                 i = rnorm(students, mean = 1 + 3 * d),
+                 p = k + rnorm(students, 0.8 * i)) %>%
+    mutate(across(where(is.double), standardize))
+
+ed_dat
+
+ed_mod <- brm(p ~ 1 + d, data = ed_dat, family = gaussian,
+              prior = c(prior(normal(0, 0.2), class = Intercept),
+                        prior(normal(0, 0.5), class = b),
+                        prior(exponential(1), class = sigma)),
+              iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+              file = here("fits", "chp6", "b6h7-causal"))
+
+as_draws_df(ed_mod) %>%
+    as_tibble() %>%
+    select(b_Intercept, b_d, sigma) %>%
+    pivot_longer(everything()) %>%
+    ggplot(aes(x = value, y = name)) +
+    stat_halfeye(.width = c(0.67, 0.89, 0.97)) +
+    labs(x = "Parameter Value", y = "Parameter")

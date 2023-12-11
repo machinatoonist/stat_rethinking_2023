@@ -1,6 +1,6 @@
 library(rethinking)
 library(dagitty)
-
+library(dplyr)
 # References ----
 # https://sr2-solutions.wjakethompson.com/causes-confounds-colliders
 # https://bookdown.org/content/4857/the-haunted-dag-the-causal-terror.html#summary-and-a-little-more-practice
@@ -827,3 +827,61 @@ as_draws_df(ed_mod) %>%
     ggplot(aes(x = value, y = name)) +
     stat_halfeye(.width = c(0.67, 0.89, 0.97)) +
     labs(x = "Parameter Value", y = "Parameter")
+
+# Simulating a collider ----
+n = 1000
+X = rbern(n, 0.5)
+Y = rbern(n, 0.5)
+Z = rbern(n, ifelse(X + Y > 0, 0.9, 0.2))
+
+cor(X, Y)
+table(X, Y)
+
+# Inducing correlation where no relationship exists ----
+# Condition on Z = 0
+tbl = tibble(X = X, Y = Y, Z = Z)
+tbl
+tbl_0 = 
+    tbl %>% 
+    filter(Z == 0)
+tbl_0
+
+tbl_0 %>% table()
+
+cor(tbl_0$X, tbl_0$Y)
+cor(X[Z == 0], Y[Z == 0])
+
+cor(X[Z == 1], Y[Z == 1])
+
+# Example 2
+cols = c(4,2)
+
+N = 300
+X = rnorm(N)
+Y = rnorm(N)
+Z = rbern(N, inv_logit(2*X + 2*Y - 2))
+plot(X, Y, col = cols[Z + 1], lwd = 3)
+abline(lm(Y[Z == 1] ~ X[Z == 1]), col = 2, lwd = 3)
+abline(lm(Y[Z == 0] ~ X[Z == 0]), col = 4, lwd = 3)
+abline(lm(Y ~ X), lwd = 3)
+
+# Colliders can already be in the data 
+# eg: selection bias by looking at funded grants where each are scored on
+# newsworthiness and trustworthiness
+
+# Simulating a descendant Z -> A, X -> Z -> Y ----
+n = 1000
+X = rbern(n, 0.5)
+Z = rbern(n, (1 - X) * 0.1 + X * 0.9)
+Y = rbern(n, (1 - Z) * 0.1 + Z * 0.9)
+A = rbern(n, (1 - Z) * 0.1 + Z * 0.9)
+
+table(X, Y)
+cor(X, Y)
+
+# A is a descendant confounder of a pipe.  Conditioning on it reduces the effect of X on Y
+cor(X[A == 0], Y[A == 0])
+cor(X[A == 1], Y[A == 1])
+
+# Descendants are everywhere.  Many of our measurements are proxies of
+# what we want to measure

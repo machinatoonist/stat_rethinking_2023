@@ -104,7 +104,12 @@ m7.6 = quap(
 )
 precis(m7.6, depth = 2)
 
+post = extract.samples(m7.1)
+mass_seq = seq(from = min(d$mass_std), to = max(d$mass_std), length.out = 100)
+l = link(m7.1, data = list(mass_std = mass_seq))
+
 plot_fit = function(model) {
+    par(mar = c(4, 4, 2, 2))
     post = extract.samples(model)
     mass_seq = seq(from = min(d$mass_std), to = max(d$mass_std), length.out = 100)
     l = link(model, data = list(mass_std = mass_seq))
@@ -117,6 +122,7 @@ plot_fit = function(model) {
     
 }
 
+plot_fit(m7.1)
 plot_fit(m7.2)
 
 plot_fit(m7.3)
@@ -127,4 +133,75 @@ plot_fit(m7.5)
 
 plot_fit(m7.6)
 
+# Function refits the model by leaving one out and replots
+brain_loo_plot(fit = m7.5)
 
+# function (fit, atx = c(35, 47, 60), aty = c(450, 900, 1300), 
+#           xlim, ylim, npts = 100) 
+# {
+#     post <- extract.samples(fit)
+#     n <- dim(post$b)[2]
+#     if (is.null(n)) 
+#         n <- 1
+#     if (missing(xlim)) 
+#         xlim <- range(d$mass_std)
+#     else xlim <- (xlim - mean(d$mass))/sd(d$mass)
+#     if (missing(ylim)) 
+#         ylim <- range(d$brain_std)
+#     else ylim <- ylim/max(d$brain)
+#     plot(d$brain_std ~ d$mass_std, xaxt = "n", yaxt = "n", xlab = "body mass (kg)", 
+#          ylab = "brain volume (cc)", col = rangi2, pch = 16, 
+#          xlim = xlim, ylim = ylim)
+#     axis_unscale(1, atx, d$mass)
+#     axis_unscale(2, at = aty, factor = max(d$brain))
+#     d <- as.data.frame(fit@data)
+#     for (i in 1:nrow(d)) {
+#         di <- d[-i, ]
+#         m_temp <- quap(fit@formula, data = di, start = list(b = rep(0, 
+#                                                                     n)))
+#         xseq <- seq(from = xlim[1] - 0.2, to = xlim[2] + 0.2, 
+#                     length.out = npts)
+#         l <- link(m_temp, data = list(mass_std = xseq), refresh = 0)
+#         mu <- apply(l, 2, mean)
+#         lines(xseq, mu, lwd = 2, col = col.alpha("black", 0.3))
+#     }
+#     model_name <- deparse(match.call()[[2]])
+#     mtext(model_name, adj = 0)
+# }
+
+# Information entropy ----
+# Suppose there is a 0.7 probability of sunshine and 0.3 probability of rain
+get_entropy = function(p) {
+    -sum(p * log(p))
+}
+
+p = c(0.3, 0.7)
+
+get_entropy(p)
+
+# Adding more potential outcomes increases entropy
+# p(rain) = 0.15, p(snow) = 0.15, p(sunshine) = 0.7
+p = c(0.15, 0.15, 0.7)
+
+get_entropy(p)
+
+# Reducing uncertainty reduces entropy
+# p(sun) = 0.99, p(rain) = 0.01
+p = c(0.99, 0.01)
+
+get_entropy(p)
+
+# Log Pointwise Predictive Density ----
+
+set.seed(1)
+
+lppd(m7.1, n = 1e4)
+
+N = 20
+kseq = 1:5
+dev = sapply(kseq, function(k) {
+    print(k);
+    r = replicate(1e4, sim_train_test(N = N, k = k));
+    c(mean(r[1,]), mean(r[2,]), sd(r[1,]), sd(r[2,]))
+})
+dev

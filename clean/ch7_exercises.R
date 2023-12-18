@@ -205,3 +205,79 @@ dev = sapply(kseq, function(k) {
     c(mean(r[1,]), mean(r[2,]), sd(r[1,]), sd(r[2,]))
 })
 dev
+
+# Widely Application Information Criteria (WAIC) ----
+data(cars)
+library(dplyr)
+cars %>% glimpse()
+m = quap(
+    alist(
+        dist ~ dnorm(mu, sigma),
+        mu <- a + b * speed,
+        a ~ dnorm(0, 10),
+        b ~ dnorm(0, 10),
+        sigma ~ dexp(1)
+    ), data = cars
+)
+m
+
+set.seed(94)
+post = extract.samples(m, n = 1000)
+post
+
+# log-likelihood of each observation i at each sample s from the posterior
+# 
+# 1. Compare the actual data (`cars$dist`) to the model predictions (`mu`). 
+# `mu` is computed for each car's speed, using the parameters (`a` and `b`) 
+# drawn from the posterior distribution.
+# 
+# 2. **Standard Deviation `post$sigma[s]`**: This represents the model's 
+# uncertainty about the distance (`dist`) for a given speed. Each `s` 
+# represents a different set of parameters drawn from the posterior, 
+# reflecting different plausible states of the world according to your model.
+# 
+# 3. **Likelihood Instead of Distance Measurement**: Instead of using a metric 
+# like RMSE (Root Mean Square Error), which measures the distance between 
+# observed data and model predictions, you're calculating the likelihood. 
+# This likelihood quantifies how probable the observed distances are given 
+# the model's predictions (for mean `mu`) and uncertainty (`sigma`).
+# 
+# 4. **Calculating Likelihood at Each Point**: Calculate the 
+# likelihood for each observed distance given the model parameters. 
+# This is done using the `dnorm()` function, which gives the probability 
+# density of observing each specific `dist` value under a normal distribution 
+# defined by `mu` and `sigma`.
+# 
+# 5. **Log-Likelihood**: Finally, taking the log of this likelihood results 
+# in the log-likelihood. This transformation is beneficial for numerical 
+# stability and simplifies calculations, especially when multiplying many 
+# probabilities together (as in the likelihood of observing an entire dataset).
+# 
+# In essence, this process evaluates how well your model (with its specific 
+# parameters for mean and standard deviation) explains the observed data. Each 
+# set of parameters from the posterior distribution gives a slightly different 
+# perspective on this fit, and the log-likelihoods you calculate provide a 
+# quantifiable measure of this fit.
+
+n_samples = 1000
+logprob = sapply(1:n_samples,
+                 function(s) {
+                     mu = post$a[s] + post$b * cars$speed
+                     # Calculate the log-likelihood of each point
+                     dnorm(cars$dist, mu, post$sigma[s], log = TRUE)
+                 })
+
+n_cases = nrow(cars)
+# 
+lppd = sapply(1:n_cases, function(i) log_sum_exp(logprob[i,]) - log(n_samples))
+
+sum(lppd)
+
+pWAIC = sapply(1:n_cases, function(i) var(logprob[i,]))
+
+# Compute WAIC
+-2 * ( sum(lppd) - sum(pWAIC))
+
+# Compute the standard error
+waic_vec = -2 * (lppd - pWAIC)
+sqrt(n_cases * var(waic_vec))

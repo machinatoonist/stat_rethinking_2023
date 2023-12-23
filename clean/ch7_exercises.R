@@ -281,3 +281,211 @@ pWAIC = sapply(1:n_cases, function(i) var(logprob[i,]))
 # Compute the standard error
 waic_vec = -2 * (lppd - pWAIC)
 sqrt(n_cases * var(waic_vec))
+
+# Comparing models ----
+library(rethinking)
+data("WaffleDivorce")
+d = WaffleDivorce
+
+d$A = standardize(d$MedianAgeMarriage)
+d$D = standardize(d$Divorce)
+d$M = standardize(d$Marriage)
+
+m5.1 = quap(
+    alist(
+        D ~ dnorm(mu, sigma),
+        mu <- a + bA * A,
+        a ~ dnorm(0, 0.2),
+        bA ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ), data = d
+)
+
+m5.2 = quap(
+    alist(
+        D ~ dnorm(mu, sigma),
+        mu <- a + bM * M,
+        a ~ dnorm(0, 0.2),
+        bM ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ), data = d
+)
+
+m5.3 = quap(
+    alist(
+        D ~ dnorm(mu, sigma),
+        mu <- a + bM * M + bA * A,
+        a ~ dnorm(0, 0.2),
+        bA ~ dnorm(0, 0.5),
+        bM ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ), data = d
+)
+
+set.seed(24071847)
+compare(m5.1, m5.2, m5.3)
+
+compare(m5.1, m5.2, m5.3, func = PSIS)
+
+set.seed(24071847)
+PSIS_m5.3 = PSIS(m5.3, pointwise = TRUE)
+
+set.seed(24071847)
+WAIC_m5.3 = WAIC(m5.3, pointwise = TRUE)
+
+plot(PSIS_m5.3$k, WAIC_m5.3$penalty, xlab = "PSIS Pareto k",
+     ylab = "WAIC penalty", col = rangi2, lwd = 2)
+
+# Re-estimate divorce model using the Student-t distribution with v = 2
+m5.3t = quap(
+    alist(
+        D ~ dstudent(nu = 2, mu, sigma),
+        mu <- a + bM * M + bA * A,
+        a ~ dnorm(0, 0.2),
+        bA ~ dnorm(0, 0.5),
+        bM ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ), data = d
+)
+
+summary(m5.3)
+summary(m5.3t)
+
+plot(PSIS_m5.3$k, WAIC_m5.3$penalty, xlab = "PSIS Pareto k",
+     ylab = "WAIC penalty", col = rangi2, lwd = 2)
+
+
+compare(m5.1, m5.2, m5.3, m5.3t, func = PSIS)
+
+set.seed(24071847)
+PSIS_m5.3t = PSIS(m5.3t, pointwise = TRUE)
+
+set.seed(24071847)
+WAIC_m5.3t = WAIC(m5.3t, pointwise = TRUE)
+
+plot(PSIS_m5.3t$k, WAIC_m5.3t$penalty, xlab = "PSIS Pareto k",
+     ylab = "WAIC penalty", col = rangi2, lwd = 2)
+
+# End of chapter practice ----
+# 7.2
+library(purrr)
+p_logp <- function(p) {
+    if (p == 0) return(0)
+    p * log(p)
+}
+calc_entropy <- function(x) {
+    avg_logprob <- sum(map_dbl(x, p_logp))
+    - 1 * avg_logprob
+}
+
+?map_dbl()
+calc_entropy(c(0.7, 0.3))
+
+# 7.3
+probs <- c(0.20, 0.25, 0.25, 0.30)
+calc_entropy(probs)
+
+# 7.4
+probs <- c(1, 1, 1, 0)
+probs <- probs / sum(probs)
+probs
+
+calc_entropy(probs)
+
+# 7M3
+gen_data <- function(n) {
+    tibble(x1 = rnorm(n = n)) %>%
+        mutate(y = rnorm(n = n, mean = 0.3 + 0.8 * x1),
+               across(everything(), standardize))
+}
+
+library(ggplot2)
+library(brms)
+library(here)
+library(tibble)
+library(tidyr)
+library(readr)
+library(ggridges)
+library(forcats)
+library(stringr)
+
+
+tibble(x1 = rnorm(n = 100) ) %>% 
+    mutate(y = rnorm(n = 100, mean = 0.3 + 0.8 * x1)) %>% 
+    ggplot(aes(x1, y)) +
+    geom_point()
+
+fit_model <- function(dat) {
+    suppressMessages(output <- capture.output(
+        mod <- brm(y ~ 1 + x1, data = dat, family = gaussian,
+                   prior = c(prior(normal(0, 0.2), class = Intercept),
+                             prior(normal(0, 0.5), class = "b"),
+                             prior(exponential(1), class = sigma)),
+                   iter = 4000, warmup = 3000, chains = 4, cores = 6, seed = 1234)
+    ))
+    
+    return(mod)
+}
+
+d = gen_data(100)
+m.7m3 = fit_model(d)
+summary(m.7m3)
+
+calc_info <- function(model) {
+    # Compute the Pointwise Log-Likelihood
+    mod_lppd <- log_lik(model) %>% 
+        as_tibble(.name_repair = "minimal") %>% 
+        set_names(paste0("obs_", 1:ncol(.))) %>% 
+        rowid_to_column(var = "iter") %>% 
+        pivot_longer(-iter, names_to = "obs", values_to = "logprob") %>% 
+        mutate(prob = exp(logprob)) %>% 
+        group_by(obs) %>% 
+        summarize(log_prob_score = log(mean(prob))) %>% 
+        pull(log_prob_score) %>% 
+        sum()
+    
+    mod_waic <- suppressWarnings(waic(model)$estimates["waic", "Estimate"])
+    mod_psis <- suppressWarnings(loo(model)$estimates["looic", "Estimate"])
+    
+    tibble(lppd = mod_lppd, waic = mod_waic, psis = mod_psis)
+}
+
+log_lik(m.7m3) %>% 
+    as_tibble(.name_repair = "minimal") %>% 
+    set_names(paste0("obs_", 1:ncol(.))) %>% 
+    rowid_to_column(var = "iter") %>% 
+    pivot_longer(-iter, names_to = "obs", values_to = "logprob") %>% 
+    mutate(prob = exp(logprob)) %>% 
+    group_by(obs) %>% 
+    summarize(log_prob_score = log(mean(prob))) %>% 
+    pull(log_prob_score) %>% 
+    sum()
+
+??rowid_to_column()
+?log_lik()
+
+calc_info(m.7m3)
+
+sample_sim <- tibble(sample_size = rep(c(100, 500, 1000), each = 1)) %>%
+    mutate(sample_data = map(sample_size, gen_data),
+           model = map(sample_data, fit_model),
+           infc = map(model, calc_info)) %>%
+    select(-sample_data, -model) %>% 
+    unnest(infc) %>% 
+    write_rds(here("fits", "chp7", "b7m3-sim.rds"), compress = "gz")
+
+sample_sim %>%
+    pivot_longer(cols = c(lppd, waic, psis)) %>%
+    mutate(sample_size = fct_inorder(as.character(sample_size)),
+           name = str_to_upper(name),
+           name = fct_inorder(name)) %>%
+    ggplot(aes(x = value, y = sample_size)) +
+    geom_col() +
+    facet_wrap(~name, ncol = 1) +
+    # facet_wrap(~name, nrow = 1, scales = "free_x") +
+    # geom_density_ridges(bandwidth = 4) +
+    scale_y_discrete(expand = c(0, .1)) +
+    scale_x_continuous(breaks = seq(-2000, 3000, by = 750)) +
+    coord_cartesian(clip = "off") +
+    labs(x = "Value", y = "Sample Size") +
+    theme_minimal()

@@ -105,5 +105,15 @@ fit_kidney4 = brm(time ~ standardize(age) + sex,
 
 pp_check(fit_kidney4, type = "ecdf_overlay")
 
+# Right censoring where reinfection did not occur during the period of the study
+fit_kidney5 = brm(time | cens(censored) ~ age + sex, 
+                  family = Gamma("log"), 
+                  data = kidney)
 
+pp_check(fit_kidney5, type = "error_scatter_avg")
+
+?pp_check()
+
+
+# Using splines and Gaussian processes ----
 

@@ -1,4 +1,17 @@
 library(rethinking)
+library(dplyr)
+library(readr)
+library(here)
+library(tidyr)
+library(purrr)
+library(ggplot2)
+library(forcats)
+library(brms)
+library(glue)
+library(loo)
+library(ggridges)
+library(tidybayes)
+
 
 sppnames = c("afarensis", "africanus", "habilis", "boisei",
              "rudolfensis", "ergaster", "sapiens")
@@ -489,3 +502,401 @@ sample_sim %>%
     coord_cartesian(clip = "off") +
     labs(x = "Value", y = "Sample Size") +
     theme_minimal()
+
+# 7M4 ----
+gen_data <- function(n) {
+    tibble(x1 = rnorm(n = n),
+           x2 = rnorm(n = n),
+           x3 = rnorm(n = n)) %>%
+        mutate(y = rnorm(n = n, mean = 0.3 + 0.8 * x1 +
+                             0.6 * x2 + 1.2 * x3),
+               across(everything(), standardize))
+}
+
+fit_model <- function(dat, p_sd) {
+    suppressMessages(output <- capture.output(
+        mod <- brm(y ~ 1 + x1 + x2 + x3, data = dat,
+                   family = gaussian,
+                   prior = c(prior(normal(0, 0.2), class = Intercept),
+                             prior_string(glue("normal(0, {p_sd})"), class = "b"),
+                             prior(exponential(1), class = sigma)),
+                   iter = 4000, warmup = 3000, chains = 4, cores = 4, seed = 1234)
+    ))
+    
+    return(mod)
+}
+
+calc_info <- function(model) {
+    w <- suppressWarnings(brms::waic(model))
+    p <- suppressWarnings(brms::loo(model))
+    
+    tibble(p_waic = w$estimates["p_waic", "Estimate"],
+           p_loo = p$estimates["p_loo", "Estimate"])
+}
+
+
+prior_sim <- tibble(sample_size = 20,
+                    prior_sd = rep(c(0.1, 1, 2), each = 1)) %>% 
+    mutate(sample_data = map(sample_size, gen_data),
+           model = map2(sample_data, prior_sd, fit_model),
+           infc = map(model, calc_info)
+           ) %>%
+    select(-sample_data, -model) %>% 
+    unnest(infc) 
+    # write_rds(here("fits", "chp7", "b7m4-sim.rds"), compress = "gz")
+
+prior_sim %>%
+    pivot_longer(cols = c(p_waic, p_loo)) %>%
+    mutate(prior_sd = glue("&sigma; = {prior_sd}"),
+           prior_sd = fct_inorder(prior_sd),
+           name = factor(name, levels = c("p_waic", "p_loo"),
+                         labels = c("p<sub>WAIC</sub>", "p<sub>PSIS</sub>"))) %>%
+    ggplot(aes(x = value, y = prior_sd, height = stat(density))) +
+    facet_wrap(~name, nrow = 1) +
+    geom_density_ridges(stat = "binline", bins = 20) +
+    labs(x = "Effective Parameters", y = "Prior") 
+    # theme(axis.text.y = element_markdown())
+
+# 7H1 ----
+data(Laffer)
+
+laf_dat <- Laffer %>%
+    mutate(across(everything(), standardize),
+           tax_rate2 = tax_rate ^ 2)
+
+laf_line <- brm(tax_revenue ~ 1 + tax_rate, data = laf_dat, family = gaussian,
+                prior = c(prior(normal(0, 0.2), class = Intercept),
+                          prior(normal(0, 0.5), class = b),
+                          prior(exponential(1), class = sigma)),
+                iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+                file = here("fits", "chp7", "b7h1-line.rds"))
+
+laf_quad <- brm(tax_revenue ~ 1 + tax_rate + tax_rate2, data = laf_dat,
+                family = gaussian,
+                prior = c(prior(normal(0, 0.2), class = Intercept),
+                          prior(normal(0, 0.5), class = b),
+                          prior(exponential(1), class = sigma)),
+                iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+                file = here("fits", "chp7", "b7h1-quad.rds"))
+
+laf_spln <- brm(tax_revenue ~ 1 + s(tax_rate, bs = "bs"), data = laf_dat,
+                family = gaussian,
+                prior = c(prior(normal(0, 0.2), class = Intercept),
+                          prior(normal(0, 0.5), class = b),
+                          prior(normal(0, 0.5), class = sds),
+                          prior(exponential(1), class = sigma)),
+                iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+                control = list(adapt_delta = 0.95),
+                file = here("fits", "chp7", "bh71-spln.rds"))
+
+tr_seq <- tibble(tax_rate = seq(0, 40, length.out = 100)) %>%
+    mutate(tax_rate = (tax_rate - mean(Laffer$tax_rate)) / sd(Laffer$tax_rate),
+           tax_rate2 = tax_rate ^ 2)
+
+predictions <- bind_rows(
+    predicted_draws(laf_line, newdata = tr_seq) %>%
+        median_qi(.width = 0.89) %>%
+        mutate(type = "Linear"),
+    predicted_draws(laf_quad, newdata = tr_seq) %>%
+        median_qi(.width = 0.89) %>%
+        mutate(type = "Quadratic"),
+    predicted_draws(laf_spln, newdata = tr_seq) %>%
+        median_qi(.width = 0.89) %>%
+        mutate(type = "Spline")
+)
+
+fits <- bind_rows(
+    epred_draws(laf_line, newdata = tr_seq) %>%
+        median_qi(.width = c(0.67, 0.89, 0.97)) %>%
+        mutate(type = "Linear"),
+    epred_draws(laf_quad, newdata = tr_seq) %>%
+        median_qi(.width = c(0.67, 0.89, 0.97)) %>%
+        mutate(type = "Quadratic"),
+    epred_draws(laf_spln, newdata = tr_seq) %>%
+        median_qi(.width = c(0.67, 0.89, 0.97)) %>%
+        mutate(type = "Spline")
+)
+
+blue_colors <- c("#ADD8E6", "#87CEEB", "#4682B4")
+
+ggplot() +
+    facet_wrap(~type, nrow = 1) +
+    geom_ribbon(data = predictions,
+                aes(x = tax_rate, ymin = .lower, ymax = .upper),
+                alpha = 0.2) +
+    geom_lineribbon(data = fits,
+                    aes(x = tax_rate, y = .epred, ymin = .lower, ymax = .upper),
+                    linewidth = 0.6) +
+    geom_point(data = laf_dat, aes(x = tax_rate, y = tax_revenue),
+               alpha = 0.5) +
+    scale_fill_manual(values = blue_colors) +
+    # scale_fill_manual(values = ramp_blue(seq(0.9, 0.1, length.out = 3)),
+    #                   breaks = c(0.67, 0.89, 0.97)) +
+    labs(x = "Standardized Tax Rate", y = "Standardized Tax Revenue",
+         fill = "Interval") +
+    theme_minimal()
+
+laf_line <- add_criterion(laf_line, criterion = c("loo", "waic"))
+laf_quad <- add_criterion(laf_quad, criterion = c("loo", "waic"))
+laf_spln <- add_criterion(laf_spln, criterion = c("loo", "waic"))
+
+loo_compare(laf_line, laf_quad, laf_spln, criterion = "waic")
+
+loo_compare(laf_line, laf_quad, laf_spln, criterion = "loo")
+
+# 7H2 ----
+library(gghighlight)
+
+criteria_influence <- function(mod) {
+    tibble(pareto_k = mod$criteria$loo$diagnostics$pareto_k,
+           p_waic = mod$criteria$waic$pointwise[, "p_waic"]) %>%
+        rowid_to_column(var = "obs")
+}
+
+influ <- bind_rows(
+    criteria_influence(laf_line) %>%
+        mutate(type = "Linear"),
+    criteria_influence(laf_quad) %>%
+        mutate(type = "Quadratic"),
+    criteria_influence(laf_spln) %>%
+        mutate(type = "Spline")
+)
+
+ggplot(influ, aes(x = pareto_k, y = p_waic)) +
+    facet_wrap(~type, nrow = 1) +
+    geom_vline(xintercept = 0.7, linetype = "dashed") +
+    geom_hline(yintercept = 0.4, linetype = "dashed") +
+    geom_point() +
+    gghighlight(pareto_k > 0.7 | p_waic > 0.4, n = 1, label_key = obs,
+                label_params = list(size = 3)) +
+    labs(x = "Pareto *k*", y = "p<sub>WAIC</sub>")
+
+laf_line2 <- brm(bf(tax_revenue ~ 1 + tax_rate, nu = 1),
+                 data = laf_dat, family = student,
+                 prior = c(prior(normal(0, 0.2), class = Intercept),
+                           prior(normal(0, 0.5), class = b),
+                           prior(exponential(1), class = sigma)),
+                 iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+                 file = here("fits", "chp7", "b7h2-line.rds"))
+
+laf_quad2 <- brm(bf(tax_revenue ~ 1 + tax_rate + tax_rate2, nu = 1),
+                 data = laf_dat, family = student,
+                 prior = c(prior(normal(0, 0.2), class = Intercept),
+                           prior(normal(0, 0.5), class = b),
+                           prior(exponential(1), class = sigma)),
+                 iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+                 file = here("fits", "chp7", "b7h2-quad.rds"))
+
+laf_spln2 <- brm(bf(tax_revenue ~ 1 + s(tax_rate, bs = "bs"), nu = 1),
+                 data = laf_dat, family = student,
+                 prior = c(prior(normal(0, 0.2), class = Intercept),
+                           prior(normal(0, 0.5), class = b),
+                           prior(normal(0, 0.5), class = sds),
+                           prior(exponential(1), class = sigma)),
+                 iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+                 control = list(adapt_delta = 0.99),
+                 file = here("fits", "chp7", "bh72-spln.rds"))
+
+predictions <- bind_rows(
+    predicted_draws(laf_line2, newdata = tr_seq) %>%
+        median_qi(.width = 0.89) %>%
+        mutate(type = "Linear"),
+    predicted_draws(laf_quad2, newdata = tr_seq) %>%
+        median_qi(.width = 0.89) %>%
+        mutate(type = "Quadratic"),
+    predicted_draws(laf_spln2, newdata = tr_seq) %>%
+        median_qi(.width = 0.89) %>%
+        mutate(type = "Spline")
+)
+
+fits <- bind_rows(
+    epred_draws(laf_line2, newdata = tr_seq) %>%
+        median_qi(.width = c(0.67, 0.89, 0.97)) %>%
+        mutate(type = "Linear"),
+    epred_draws(laf_quad2, newdata = tr_seq) %>%
+        median_qi(.width = c(0.67, 0.89, 0.97)) %>%
+        mutate(type = "Quadratic"),
+    epred_draws(laf_spln2, newdata = tr_seq) %>%
+        median_qi(.width = c(0.67, 0.89, 0.97)) %>%
+        mutate(type = "Spline")
+)
+
+ggplot() +
+    facet_wrap(~type, nrow = 1) +
+    geom_ribbon(data = predictions,
+                aes(x = tax_rate, ymin = .lower, ymax = .upper),
+                alpha = 0.2) +
+    geom_lineribbon(data = fits,
+                    aes(x = tax_rate, y = .epred, ymin = .lower, ymax = .upper),
+                    size = 0.6) +
+    geom_point(data = laf_dat, aes(x = tax_rate, y = tax_revenue),
+               alpha = 0.5) +
+    scale_fill_manual(values = ramp_blue(seq(0.9, 0.1, length.out = 3)),
+                      breaks = c(0.67, 0.89, 0.97)) +
+    labs(x = "Standardized Tax Rate", y = "Standardized Tax Revenue",
+         fill = "Interval")
+
+laf_line2 <- add_criterion(laf_line2, criterion = c("loo", "waic"))
+laf_quad2 <- add_criterion(laf_quad2, criterion = c("loo", "waic"))
+laf_spln2 <- add_criterion(laf_spln2, criterion = c("loo", "waic"))
+
+loo_compare(laf_line2, laf_quad2, laf_spln2, criterion = "waic")
+loo_compare(laf_line2, laf_quad2, laf_spln2, criterion = "loo")
+
+# 7H3 ----
+islands <- tibble(island = paste("Island", 1:3),
+                  a = c(0.2, 0.8, 0.05),
+                  b = c(0.2, 0.1, 0.15),
+                  c = c(0.2, 0.05, 0.7),
+                  d = c(0.2, 0.025, 0.05),
+                  e = c(0.2, 0.025, 0.05)) %>%
+    pivot_longer(-island, names_to = "species", values_to = "prop")
+
+islands %>%
+    group_by(island) %>%
+    summarize(prop = list(prop), .groups = "drop") %>%
+    mutate(entropy = map_dbl(prop, calc_entropy))
+
+d_kl <- function(p, q) {
+    sum(p * (log(p) - log(q)))
+}
+
+crossing(model = paste("Island", 1:3),
+         predicts = paste("Island", 1:3)) %>%
+    filter(model != predicts) %>%
+    left_join(islands, by = c("model" = "island")) %>%
+    rename(model_prop = prop) %>%
+    left_join(islands, by = c("predicts" = "island", "species")) %>%
+    rename(predict_prop = prop) %>%
+    group_by(model, predicts) %>%
+    summarize(q = list(model_prop),
+              p = list(predict_prop),
+              .groups = "drop") %>%
+    mutate(kl_distance = map2_dbl(p, q, d_kl))
+
+# 7H4 ----
+library(dagitty)
+library(ggdag)
+
+hma_dag <- dagitty("dag{H -> M <- A}")
+coordinates(hma_dag) <- list(x = c(H = 1, M = 2, A = 3),
+                             y = c(H = 1, M = 1, A = 1))
+
+ggplot(hma_dag, aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_dag_text(color = "black", size = 10) +
+    geom_dag_edges(edge_color = "black", edge_width = 2,
+                   arrow_directed = grid::arrow(length = grid::unit(15, "pt"),
+                                                type = "closed")) +
+    theme_void()
+
+d <- sim_happiness(seed = 1977, N_years = 1000)
+dat <- d %>%
+    filter(age > 17) %>%
+    mutate(a = (age - 18) / (65 - 18),
+           mid = factor(married + 1, labels = c("single", "married")))
+
+b6.9 <- brm(happiness ~ 0 + mid + a, data = dat, family = gaussian,
+            prior = c(prior(normal(0, 1), class = b, coef = midmarried),
+                      prior(normal(0, 1), class = b, coef = midsingle),
+                      prior(normal(0, 2), class = b, coef = a),
+                      prior(exponential(1), class = sigma)),
+            iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+            file = here("fits", "chp7", "b7h4-6.9"))
+
+b6.10 <- brm(happiness ~ 1 + a, data = dat, family = gaussian,
+             prior = c(prior(normal(0, 1), class = Intercept),
+                       prior(normal(0, 2), class = b, coef = a),
+                       prior(exponential(1), class = sigma)),
+             iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+             file = here("fits", "chp7", "b7h4-6.10"))
+
+b6.9 <- add_criterion(b6.9, criterion = "loo")
+b6.10 <- add_criterion(b6.10, criterion = "loo")
+
+loo_compare(b6.9, b6.10)
+
+adjustmentSets(hma_dag, exposure = "A", outcome = "H")
+
+# 7H5 ----
+data(foxes)
+
+fox_dat <- foxes %>%
+    as_tibble() %>%
+    select(area, avgfood, weight, groupsize) %>%
+    mutate(across(everything(), standardize))
+
+b7h5_1 <- brm(weight ~ 1 + avgfood + groupsize + area, data = fox_dat,
+              family = gaussian,
+              prior = c(prior(normal(0, 0.2), class = Intercept),
+                        prior(normal(0, 0.5), class = b),
+                        prior(exponential(1), class = sigma)),
+              iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+              file = here("fits", "chp7", "b7h5_1"))
+
+b7h5_2 <- brm(weight ~ 1 + avgfood + groupsize, data = fox_dat,
+              family = gaussian,
+              prior = c(prior(normal(0, 0.2), class = Intercept),
+                        prior(normal(0, 0.5), class = b),
+                        prior(exponential(1), class = sigma)),
+              iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+              file = here("fits", "chp7", "b7h5_2"))
+
+b7h5_3 <- brm(weight ~ 1 + groupsize + area, data = fox_dat,
+              family = gaussian,
+              prior = c(prior(normal(0, 0.2), class = Intercept),
+                        prior(normal(0, 0.5), class = b),
+                        prior(exponential(1), class = sigma)),
+              iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+              file = here("fits", "chp7", "b7h5_3"))
+
+b7h5_4 <- brm(weight ~ 1 + avgfood, data = fox_dat,
+              family = gaussian,
+              prior = c(prior(normal(0, 0.2), class = Intercept),
+                        prior(normal(0, 0.5), class = b),
+                        prior(exponential(1), class = sigma)),
+              iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+              file = here("fits", "chp7", "b7h5_4"))
+
+b7h5_5 <- brm(weight ~ 1 + area, data = fox_dat,
+              family = gaussian,
+              prior = c(prior(normal(0, 0.2), class = Intercept),
+                        prior(normal(0, 0.5), class = b),
+                        prior(exponential(1), class = sigma)),
+              iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+              file = here("fits", "chp7", "b7h5_5"))
+
+b7h5_1 <- add_criterion(b7h5_1, criterion = "waic")
+b7h5_2 <- add_criterion(b7h5_2, criterion = "waic")
+b7h5_3 <- add_criterion(b7h5_3, criterion = "waic")
+b7h5_4 <- add_criterion(b7h5_4, criterion = "waic")
+b7h5_5 <- add_criterion(b7h5_5, criterion = "waic")
+
+comp <- loo_compare(b7h5_1, b7h5_2, b7h5_3, b7h5_4, b7h5_5, criterion = "waic")
+comp
+
+plot_comp <- comp %>%
+    as_tibble(rownames = "model") %>%
+    mutate(across(-model, as.numeric),
+           model = fct_inorder(model))
+
+waic_val <- plot_comp %>%
+    select(model, waic, se = se_waic) %>%
+    mutate(lb = waic - se,
+           ub = waic + se)
+
+diff_val <- plot_comp %>%
+    select(model, waic, se = se_diff) %>%
+    mutate(se = se * 2) %>%
+    mutate(lb = waic - se,
+           ub = waic + se) %>%
+    filter(se != 0)
+
+ggplot() +
+    geom_pointrange(data = waic_val, mapping = aes(x = waic, xmin = lb, xmax = ub,
+                                                   y = fct_rev(model))) +
+    geom_pointrange(data = diff_val, mapping = aes(x = waic, xmin = lb, xmax = ub,
+                                                   y = fct_rev(model)),
+                    position = position_nudge(y = 0.2), shape = 2,
+                    color = "#009FB7") +
+    labs(x = "Deviance", y = NULL)
+

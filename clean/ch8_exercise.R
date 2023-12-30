@@ -148,3 +148,47 @@ fit_data %>%
         color = "Continent"
     ) +
     theme(legend.position = "bottom")
+
+# Adding an interaction that works ----
+m8.3 <-  quap(
+    alist(
+    log_gdp_std ~ dnorm(mu, sigma),
+    mu <- a[cid] + b[cid] * (rugged_std - 0.215),
+    a[cid] ~ dnorm(1, 0.1),
+    b[cid] ~ dnorm(0, 0.3),
+    sigma ~ dexp(1)
+    ), data = dd
+)
+
+precis(m8.3, depth = 2)
+
+compare(m8.1, m8.2, m8.3, func = PSIS)
+
+plot(PSIS(m8.3, pointwise = TRUE)$k)
+
+# Plotting the interaction ----
+# plot Africa - cid = 1
+d.A1 <- dd[dd$cid == 1,]
+plot(d.A1$rugged_std, d.A1$log_gdp_std, pch = 16, col = rangi2,
+     xlab = "ruggedness (standardised)", ylab = "log GDP (as proportion of mean)",
+     xlim = c(0, 1)
+     )
+
+mu <- link(m8.3, data = data.frame(cid = 1, rugged_std = rugged.seq))
+mu_mean = apply(mu, 2, mean)
+mu_ci = apply(mu, 2, PI, prob = 0.97)
+lines(rugged_seq, mu_mean, lwd = 2)
+shade(mu_ci, rugged_seq, col = col.alpha(rangi2, 0.3))
+mtext("African nations")
+
+# plot non-African - cid = 2
+d.A0 <- dd[dd$cid == 2,]
+plot(d.A0$rugged_std, d.A0$log_gdp_std, pch = 1, col = "black",
+     xlab = "ruggedness (standardised)", ylab = "log GDP (as proportion of mean)",
+     xlim = c(0, 1))
+mu = link(m8.3, data = data.frame(cid = 2, rugged_std = rugged_seq))
+mu_mean = apply(mu, 2, mean)
+mu_ci = apply(mu, 2, PI, prob = 0.97)
+lines(rugged_seq, mu_mean, lwd = 2)
+shade(mu_ci, rugged_seq)
+mtext("Non-African nations")

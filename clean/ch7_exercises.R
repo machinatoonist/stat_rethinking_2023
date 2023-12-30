@@ -11,7 +11,7 @@ library(glue)
 library(loo)
 library(ggridges)
 library(tidybayes)
-
+library(tibble)
 
 sppnames = c("afarensis", "africanus", "habilis", "boisei",
              "rudolfensis", "ergaster", "sapiens")
@@ -731,8 +731,9 @@ ggplot() +
                     size = 0.6) +
     geom_point(data = laf_dat, aes(x = tax_rate, y = tax_revenue),
                alpha = 0.5) +
-    scale_fill_manual(values = ramp_blue(seq(0.9, 0.1, length.out = 3)),
-                      breaks = c(0.67, 0.89, 0.97)) +
+    scale_fill_manual(values = blue_colors ) +
+                      #     ramp_blue(seq(0.9, 0.1, length.out = 3)),
+                      # breaks = c(0.67, 0.89, 0.97)) +
     labs(x = "Standardized Tax Rate", y = "Standardized Tax Revenue",
          fill = "Interval")
 

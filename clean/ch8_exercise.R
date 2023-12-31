@@ -138,7 +138,7 @@ fit_data =
 fit_data %>% 
     ggplot(aes(x = rugged_std, y = mu, color = cont)) +
     geom_line() +
-    geom_ribbon(aes(ymin = ci_low, ymax = ci_high), alpha = 0.2, fill = "dodgerblue") +
+    geom_ribbon(aes(ymin = ci_low, ymax = ci_high, fill = cont), alpha = 0.2) +
     theme_minimal() +
     geom_point(data = dd, aes(x = rugged_std, y = log_gdp_std, color = cont), size = 2) +
     labs(
@@ -174,7 +174,8 @@ plot(d.A1$rugged_std, d.A1$log_gdp_std, pch = 16, col = rangi2,
      xlim = c(0, 1)
      )
 
-mu <- link(m8.3, data = data.frame(cid = 1, rugged_std = rugged.seq))
+
+mu <- link(m8.3, data = data.frame(cid = 1, rugged_std = rugged_seq))
 mu_mean = apply(mu, 2, mean)
 mu_ci = apply(mu, 2, PI, prob = 0.97)
 lines(rugged_seq, mu_mean, lwd = 2)
@@ -192,3 +193,29 @@ mu_ci = apply(mu, 2, PI, prob = 0.97)
 lines(rugged_seq, mu_mean, lwd = 2)
 shade(mu_ci, rugged_seq)
 mtext("Non-African nations")
+
+
+# Symmetry of interactions ----
+rugged_seq = seq(from = -0.2, to = 1.2, length.out = 30)
+muA = link(m8.3, data = data.frame(cid = 1, rugged_std = rugged_seq))
+muN = link(m8.3, data = data.frame(cid = 2, rugged_std = rugged_seq))
+delta = muA - muN
+
+logGDP_diff = apply(delta, 2, mean)
+
+log_GDP_ci = apply(delta, 2, PI)
+
+data.frame(rugged_std = rugged_seq, logGDP_diff = logGDP_diff) %>% 
+    ggplot(aes(x = rugged_std, y = logGDP_diff)) +
+    geom_line()
+
+
+plot(rugged_seq, logGDP_diff, type = "l", lwd = 2, col = rangi2,
+     xlab = "ruggedness (standardised)", ylab = "expected difference log GDP",
+     xlim = c(0, 1)
+)
+
+lines(rugged_seq, logGDP_diff, lwd = 2)
+shade(log_GDP_ci, rugged_seq, col = col.alpha(rangi2, 0.3))
+mtext("Difference between expected log GDP ")
+

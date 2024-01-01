@@ -219,3 +219,91 @@ lines(rugged_seq, logGDP_diff, lwd = 2)
 shade(log_GDP_ci, rugged_seq, col = col.alpha(rangi2, 0.3))
 mtext("Difference between expected log GDP ")
 
+# Continuous interactions ----
+library(rethinking)
+data("tulips")
+d = tulips
+str(d)
+
+# > Rescaling ----
+# for stability and focal points for priors
+d$blooms_std = d$blooms / max(d$blooms) # Scaling blooms by its maximum
+d$water_cent = d$water - mean(d$water) # Centre water and shade around mean
+d$shade_cent = d$shade - mean(d$shade)
+
+# A normal for the intercept a with mean = 0.5, sd = 1 is too wide
+# A large proportion of the prior distribution is outside the valid interval
+a = rnorm(1e4, 0.5, 1); sum(a < 0 | a > 1) / length(a) 
+
+a = rnorm(1e4, 0.5, 0.25); sum(a < 0 | a > 1) / length(a) 
+
+str(d)
+
+m8.4 = quap(
+    alist(
+        blooms_std ~ dnorm(mu, sigma),
+        mu <- a + bw * water_cent + bs * shade_cent,
+        a ~ dnorm(0.5, 0.25),
+        bw ~ dnorm(0, 0.25),
+        bs ~ dnorm(0, 0.25),
+        sigma ~ dexp(1)
+    ), data = d
+)
+
+m8.5 = quap(
+    alist(
+        blooms_std ~ dnorm(mu, sigma),
+        mu <- a + bw * water_cent + bs * shade_cent + bws * water_cent * shade_cent,
+        a ~ dnorm(0.5, 0.25),
+        bw ~ dnorm(0, 0.25),
+        bs ~ dnorm(0, 0.25),
+        bws ~ dnorm(0, 0.25),
+        sigma ~ dexp(1)
+    ), data = d
+)
+
+precis(m8.5)
+
+# > Plotting posterior predictions ----
+# Visualise interactions with Triptych plots
+par(mfrow = c(1, 3))  # 3 plots in 1 row
+for (s in -1:1) {
+    idx <- which(d$shade_cent == s)
+    plot(d$water_cent[idx], d$blooms_std[idx], xlim = c(-1, 1), ylim = c(0, 1),
+    xlab = "water", ylab = "blooms", pch = 16, col = rangi2)
+    mu <- link(m8.4, data = data.frame(shade_cent = s, water_cent = -1:1))
+    for (i in 1:20) lines(-1:1, mu[i,], col = col.alpha("black", 0.3))
+}
+
+# The interaction model believes that the effect of water decreases as shade increases
+par(mfrow = c(1, 3))  # 3 plots in 1 row
+for (s in -1:1) {
+    idx <- which(d$shade_cent == s)
+    plot(d$water_cent[idx], d$blooms_std[idx], xlim = c(-1, 1), ylim = c(0, 1),
+         xlab = "water", ylab = "blooms", pch = 16, col = rangi2)
+    mu <- link(m8.5, data = data.frame(shade_cent = s, water_cent = -1:1))
+    for (i in 1:20) lines(-1:1, mu[i,], col = col.alpha("black", 0.3))
+}
+
+
+# > Plotting prior predictions ----
+set.seed(7)
+prior = extract.prior(m8.5)
+
+par(mfrow = c(1, 3))  # 3 plots in 1 row
+for (s in -1:1) {
+    idx <- which(d$shade_cent == s)
+    plot(d$water_cent[idx], d$blooms_std[idx], xlim = c(-1, 1), ylim = c(0, 1),
+         xlab = "water", ylab = "blooms", pch = 16, col = rangi2)
+    mu <- link(m8.4, post = prior, data = data.frame(shade_cent = s, water_cent = -1:1))
+    for (i in 1:20) lines(-1:1, mu[i,], col = col.alpha("black", 0.3))
+}
+
+par(mfrow = c(1, 3))  # 3 plots in 1 row
+for (s in -1:1) {
+    idx <- which(d$shade_cent == s)
+    plot(d$water_cent[idx], d$blooms_std[idx], xlim = c(-1, 1), ylim = c(0, 1),
+         xlab = "water", ylab = "blooms", pch = 16, col = rangi2)
+    mu <- link(m8.5, post = prior, data = data.frame(shade_cent = s, water_cent = -1:1))
+    for (i in 1:20) lines(-1:1, mu[i,], col = col.alpha("black", 0.3))
+}

@@ -964,3 +964,89 @@ b8h4b_1 <- add_criterion(b8h4b_1, criterion = "loo")
 b8h4b_2 <- add_criterion(b8h4b_2, criterion = "loo")
 
 loo_compare(b8h4b_1, b8h4b_2)
+
+# > Part c
+b8h4_c <- brm(lang_per_cap_std ~ mean_growing_std * sd_growing_std,
+              data = nettle, family = gaussian,
+              prior = c(prior(normal(0, 0.2), class = Intercept),
+                        prior(normal(0, 0.5), class = b),
+                        prior(exponential(1), class = sigma)),
+              iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+              file = here("fits", "chp8", "b8h4_c.rds"))
+
+summary(b8h4_c)
+
+library(patchwork)
+
+new_nettle <- crossing(mean_growing_std = seq(-2, 2, by = 0.5),
+                       sd_growing_std = seq(-2, 4, by = 0.5))
+
+int_preds <- new_nettle %>% 
+    add_epred_draws(b8h4_c, ndraws = 1000) %>% 
+    mean_qi(.width = 0.97)
+
+facet_levels <- seq(-2, 2, by = 2)
+sd_facets <- list_along(facet_levels)
+for (i in seq_along(sd_facets)) {
+    points <- nettle %>% 
+        mutate(diff = sd_growing_std - facet_levels[i])
+    
+    p <- int_preds %>% 
+        filter(sd_growing_std == facet_levels[i]) %>% 
+        ggplot(aes(x = mean_growing_std, y = .epred, ymin = .lower,
+                   ymax = .upper)) +
+        geom_lineribbon(fill = "#99D8E2", color = "black") +
+        geom_point(data = points,
+                   aes(x = mean_growing_std, y = lang_per_cap_std,
+                       alpha = -1 * abs(diff)), size = 0.5,
+                   inherit.aes = FALSE, show.legend = FALSE) +
+        expand_limits(x = c(-2, 2), y = c(-2.5, 3.5)) +
+        labs(x = "Mean growing season", y = "Languages",
+             subtitle = glue("SD growing season = {facet_levels[i]}")) +
+        theme(plot.subtitle = element_text(size = 10))
+    
+    if (i == 2) {
+        p <- p +
+            theme(plot.margin = margin(0, 20, 0, 20))
+    } else {
+        p <- p +
+            theme(plot.margin = margin(0, 0, 0, 0))
+    }
+    
+    sd_facets[[i]] <- p
+}
+
+mean_facets <- list_along(facet_levels)
+for (i in seq_along(mean_facets)) {
+    points <- nettle %>% 
+        mutate(diff = mean_growing_std - facet_levels[i])
+    
+    p <- int_preds %>% 
+        filter(mean_growing_std == facet_levels[i]) %>% 
+        ggplot(aes(x = sd_growing_std, y = .epred, ymin = .lower,
+                   ymax = .upper)) +
+        geom_lineribbon(fill = "#99D8E2", color = "black") +
+        geom_point(data = points,
+                   aes(x = sd_growing_std, y = lang_per_cap_std,
+                       alpha = -1 * abs(diff)), size = 0.5,
+                   inherit.aes = FALSE, show.legend = FALSE) +
+        expand_limits(x = c(-2, 2), y = c(-2.5, 3.5)) +
+        labs(x = "SD growing season", y = "Languages",
+             subtitle = glue("Mean growing season = {facet_levels[i]}")) +
+        theme(plot.subtitle = element_text(size = 10))
+    
+    if (i == 2) {
+        p <- p +
+            theme(plot.margin = margin(30, 20, 0, 20))
+    } else {
+        p <- p +
+            theme(plot.margin = margin(30, 0, 0, 0))
+    }
+    
+    mean_facets[[i]] <- p
+}
+
+sd_patch <- (sd_facets[[1]] | sd_facets[[2]] | sd_facets[[3]])
+mean_patch <- (mean_facets[[1]] | mean_facets[[2]] | mean_facets[[3]])
+
+sd_patch / mean_patch

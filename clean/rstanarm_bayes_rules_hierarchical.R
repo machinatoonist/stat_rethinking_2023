@@ -118,3 +118,81 @@ rhat(spotify_hierarchical)
 
 # 100 posterior simulated datasets of song popularity along with the actual
 pp_check(spotify_hierarchical)
+
+# Store the simulation in a data.frame
+spotify_hierarchical_df = as.data.frame(spotify_hierarchical)
+
+# Check the first 3 and last 3 parameter labels
+total_params = nlevels(spotify$artist) + 3
+total_params_less_3 = total_params - 2
+
+spotify_hierarchical_df %>% 
+    colnames() %>% 
+    as.data.frame() %>% 
+    slice(1:3, total_params_less_3:total_params)
+
+# Posterior analysis of global parameters ----
+
+# Posterior summary of mu
+tidy(spotify_hierarchical, effects = "fixed",
+     conf.int = TRUE, conf.level = 0.80)
+
+# Posterior medians for sigma_y and sigma_mu
+tidy(spotify_hierarchical, effects = "ran_pars")
+
+# posterior median of sigma_y - (sd_Observation.Residual) : Within any given
+# artists, popularity ratings tend to vary by 14 points from song to song
+
+# posterior median of sigma_mu - (sd_(Intercept).artist) : The mean popularity
+# tends to vary by 15.1 points from artist to artist. This is the between
+# standard deviation
+
+# Variance explained by differences between artists
+(correlation_of_popularity_of_songs_by_same_artist = 15.2 ^ 2 / (15.2^2 + 14.0 ^ 2))
+
+# Variance explained by differences between songs within each artist
+(variance_explained_by_differences_among_songs_within_artist =  14.0 ^ 2 / (15.2^2 + 14.0 ^ 2))
+
+# Posterior analysis and group-specific parameters ----
+artist_summary = tidy(spotify_hierarchical, effects = "ran_vals",
+                      conf.int = TRUE, conf.level = 0.80)
+
+artist_summary %>% 
+    select(level, conf.low, conf.high) %>% 
+    slice(1:2, 43:44) 
+
+# There's an 80% chance that Camilo's mean popularity rating is between 19.4 and 32.4 above
+# that of the average artist.  Likewise, there's an 80% chance that Mia X's mean popularity
+# rating is between 23.3 and 40.7 below the popularity of the average artist.
+
+# Directly simulate posterior models for the artist-specific means ----
+
+# Get MCMC chains for each mu_j
+artist_chains = spotify_hierarchical %>% 
+    spread_draws(`(Intercept)`, b[,artist]) %>% 
+    mutate(mu_j = `(Intercept)` + b)
+
+artist_chains %>% 
+    select(artist, `(Intercept)`, b, mu_j) %>% 
+    head(4)
+
+# Get posterior summaries for each artist's mean popularity mu_j
+artist_summary_scaled = artist_chains %>% 
+    select(-`(Intercept)`, -b) %>% 
+    mean_qi(.width = 0.8) %>% 
+    mutate(artist = fct_reorder(artist, mu_j))
+
+# Check out the results
+artist_summary_scaled %>% 
+    select(artist, mu_j, .lower, .upper) %>% 
+    head(4)
+
+# 80% credible intervals for each artist's mean song popularity
+ggplot(artist_summary_scaled,
+       aes(x = artist, y = mu_j, ymin = .lower, ymax = .upper)) +
+    geom_pointrange() +
+    xaxis_text(angle = 90, hjust = 1)
+
+# The larger count of songs is the main reason for greater certainty about Frank Ocean's popularity vs Lil Skies
+artist_means %>% 
+    filter(artist %in% c("Frank Ocean", "Lil Skies"))

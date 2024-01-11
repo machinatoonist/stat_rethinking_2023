@@ -61,3 +61,11 @@ plot(1:100, positions[1:100])
 
 plot(table(positions))
 
+# High dimensional problems with sampling ----
+D = 1000
+T = 1e3
+Y = rmvnorm(T, rep(0, D), diag(D))
+rad_dist = function(Y) sqrt(sum(Y^2))
+Rd = sapply(1:T, function(i) rad_dist(Y[i,]))
+dens(Rd)
+?rmvnorm()

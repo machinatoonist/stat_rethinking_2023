@@ -196,3 +196,69 @@ ggplot(artist_summary_scaled,
 # The larger count of songs is the main reason for greater certainty about Frank Ocean's popularity vs Lil Skies
 artist_means %>% 
     filter(artist %in% c("Frank Ocean", "Lil Skies"))
+
+# Posterior prediction for observed group ----
+# Simulate Ocean's posterior predictive model
+set.seed(84735)
+ocean_chains = spotify_hierarchical_df %>% 
+    rename(b = `b[(Intercept) artist:Frank_Ocean]`) %>% 
+    select(`(Intercept)`, b, sigma) %>% 
+    mutate(mu_ocean = `(Intercept)` + b,
+           y_ocean = rnorm(20000, mean = mu_ocean, sd = sigma))
+
+head(ocean_chains, 3)
+
+# Posterior summary for Y_new, j
+# The range is much wider than the 80% credible interval for Ocean's mu_j parameter
+# We can be much more certain about Ocean's underlying mean song popularity than in 
+# the popularity of any single Ocean song.
+ocean_chains %>% 
+    mean_qi(y_ocean, .width = 0.80)
+
+# Posterior summary of mu_j
+artist_summary_scaled %>% 
+    filter(artist == "artist:Frank_Ocean")
+
+# Posterior prediction for yet unobserved group ----
+# We have no information about mu_j for Mohsen Beats like we do for Frank Ocean
+# We can't take the same approach as for Frank Ocean.
+# We do know Mohsen Beats is a member of the broader population of artists
+# Mean popularity for these artists are normally distributed around the global
+# mean (mu) with between artist standard deviation sigma_mu
+
+# We need to account for:
+# 1) Within group sampling variability in Y.  Not all Mohsen Beats songs are
+# equally popular
+# 2) Between group sampling variability in mu_j.  Not all artists are equally
+# popular
+# 3) Posterior variability in the global model parameters, sigma_y, mu, sigma_mu
+
+# Manual calculation of prediction
+set.seed(84735)
+mohsen_chains = spotify_hierarchical_df %>% 
+    mutate(sigma_mu = sqrt(`Sigma[artist:(Intercept),(Intercept)]`),
+           mu_mohsen = rnorm(20000, `(Intercept)`, sigma_mu),
+           y_mohsen = rnorm(20000, mu_mohsen, sigma))
+
+# Posterior predictive summaries
+mohsen_chains %>% 
+    select(`(Intercept)`, contains("mohsen")) %>% head(5)
+
+mohsen_chains %>% 
+    mean_qi(y_mohsen, .width = 0.80)
+
+# Using posterior predict
+set.seed(84735)
+prediction_shortcut = posterior_predict(
+    spotify_hierarchical,
+    newdata = data.frame(artist = c("Frank Ocean", "Mohsen Beats"))
+)
+
+data.frame(prediction_shortcut) %>% 
+    summarise(mean_pop_frank_ocean = mean(X1),
+              mean_pop_mohsen_beats = mean(X2))
+
+# Posterior predictive model plots
+mcmc_areas(prediction_shortcut, prob = 0.8) +
+    ggplot2::scale_y_discrete(labels = c("Frank Ocean", "Mohsen Beats")) +
+    theme_minimal()

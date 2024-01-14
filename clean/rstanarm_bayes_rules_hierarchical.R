@@ -262,3 +262,87 @@ data.frame(prediction_shortcut) %>%
 mcmc_areas(prediction_shortcut, prob = 0.8) +
     ggplot2::scale_y_discrete(labels = c("Frank Ocean", "Mohsen Beats")) +
     theme_minimal()
+
+# Shrinkage and the bias-variance trade-off ----
+set.seed(84735)
+predictions_hierarchical = posterior_predict(spotify_hierarchical,
+                                             newdata = artist_means)
+
+# Posterior predictive plots
+# Contrast the hierarchical model posterior mean predictions with the complete
+# pooled model predictions (dashed horizontal line) and no pooled model predictions
+# (dark blue dots).  The hierarchical predictions are pulled or 'shrunk' toward the
+# global trends of the complete pooled model and away from the local trends of the 
+# no pooled model.  
+# 1) Shrinkage increases as the number of observations on group j decrease.
+# 2) Shrinkage increase when the variability within groups, sigma_y, is large
+# in comparison to the variability between groups sigma_mu.
+ppc_intervals(artist_means$popularity, yrep = predictions_hierarchical,
+              prob_outer = 0.80) +
+    ggplot2::scale_x_continuous(labels = artist_means$artist,
+                                breaks = 1:nrow(artist_means)) +
+    xaxis_text(angle = 90, hjust = 1) +
+    # Average popularity across all songs
+    geom_hline(yintercept = 58.4, linetype = "dashed")
+
+artist
+
+artist_means %>% 
+    filter(artist %in% c("Camila Cabello", "Lil Skies"))
+
+# Complete pooled models tend to have higher bias and lower variance
+# Unpooled models tend to have lower bias and higher variance
+# Hierarchical models tend to have lower bias and higher variance. They
+# take group-specific trends and global trends into account.
+
+# If the observed categorical data on A covers all categories, it's
+# likely not a grouping variance, but rather a potential predictor.
+# If the observed categories on X are merely a random sample from
+# many of interest it is a potential grouping variable.
+
+data(bikes)
+bikes %>% 
+    select(rides, weekend) %>% 
+    head()
+
+bikes %>% 
+    group_by(weekend) %>% 
+    tally()
+
+# The observed weekend values cover all categories of interest, so it's
+# not a grouping variable, but a potential predictor.
+
+data("big_word_club")
+big_word_club = big_word_club %>% 
+    select(score_a2, school_id) %>% 
+    na.omit()
+
+big_word_club %>% 
+    slice(1:2, 602:603)
+
+# Treating school_id as a grouping variable in a hierarchical model of score_a2
+# would allow us to extend our conclusions to the broader population of schools.
+
+# Exercises ----
+# > 16.2
+data("climbers_sub")
+climbers_sub %>% glimpse()
+
+unique(climbers_sub$season)
+
+# Expedition id is a potential grouping variable because it's a random
+# sample of many of interest
+
+# Season is a potential predictor for climber success because it covers
+# all possible values in the 4 seasons.
+
+data("coffee_ratings")
+coffee_ratings %>% glimpse()
+unique(coffee_ratings$processing_method)
+
+# Processing method is a potential grouping variable because there
+# are a fixed number of options and it is not a random sample
+
+# Farm name is a potential grouping variable because it represents a
+# random sample of any potential number of farms.
+

@@ -97,7 +97,7 @@ ppc_intervals(artist_means$popularity, yrep = predictions_no,
 ggplot(artist_means, aes(x = popularity)) +
     geom_density()
 
-# Posterior simulation
+# > Posterior simulation ----
 spotify_hierarchical = stan_glmer(
     popularity ~ (1 | artist),
     data = spotify, family = gaussian,
@@ -131,7 +131,7 @@ spotify_hierarchical_df %>%
     as.data.frame() %>% 
     slice(1:3, total_params_less_3:total_params)
 
-# Posterior analysis of global parameters ----
+# > Posterior analysis of global parameters ----
 
 # Posterior summary of mu
 tidy(spotify_hierarchical, effects = "fixed",
@@ -153,7 +153,7 @@ tidy(spotify_hierarchical, effects = "ran_pars")
 # Variance explained by differences between songs within each artist
 (variance_explained_by_differences_among_songs_within_artist =  14.0 ^ 2 / (15.2^2 + 14.0 ^ 2))
 
-# Posterior analysis and group-specific parameters ----
+# > Posterior analysis and group-specific parameters ----
 artist_summary = tidy(spotify_hierarchical, effects = "ran_vals",
                       conf.int = TRUE, conf.level = 0.80)
 
@@ -165,7 +165,7 @@ artist_summary %>%
 # that of the average artist.  Likewise, there's an 80% chance that Mia X's mean popularity
 # rating is between 23.3 and 40.7 below the popularity of the average artist.
 
-# Directly simulate posterior models for the artist-specific means ----
+# > Directly simulate posterior models for the artist-specific means ----
 
 # Get MCMC chains for each mu_j
 artist_chains = spotify_hierarchical %>% 
@@ -197,7 +197,7 @@ ggplot(artist_summary_scaled,
 artist_means %>% 
     filter(artist %in% c("Frank Ocean", "Lil Skies"))
 
-# Posterior prediction for observed group ----
+# > Posterior prediction for observed group ----
 # Simulate Ocean's posterior predictive model
 set.seed(84735)
 ocean_chains = spotify_hierarchical_df %>% 
@@ -219,7 +219,7 @@ ocean_chains %>%
 artist_summary_scaled %>% 
     filter(artist == "artist:Frank_Ocean")
 
-# Posterior prediction for yet unobserved group ----
+# > Posterior prediction for yet unobserved group ----
 # We have no information about mu_j for Mohsen Beats like we do for Frank Ocean
 # We can't take the same approach as for Frank Ocean.
 # We do know Mohsen Beats is a member of the broader population of artists
@@ -263,7 +263,7 @@ mcmc_areas(prediction_shortcut, prob = 0.8) +
     ggplot2::scale_y_discrete(labels = c("Frank Ocean", "Mohsen Beats")) +
     theme_minimal()
 
-# Shrinkage and the bias-variance trade-off ----
+# > Shrinkage and the bias-variance trade-off ----
 set.seed(84735)
 predictions_hierarchical = posterior_predict(spotify_hierarchical,
                                              newdata = artist_means)
@@ -346,3 +346,118 @@ unique(coffee_ratings$processing_method)
 # Farm name is a potential grouping variable because it represents a
 # random sample of any potential number of farms.
 
+# > 16.6 ----
+data("big_word_club")
+big_word_club = big_word_club %>% 
+    filter(treat == 1) %>% 
+    select(school_id, score_pct_change) %>% 
+    na.omit() %>% 
+    mutate(school_id = fct_reorder(school_id, score_pct_change, .fun = 'mean'))
+
+
+# a) Number of schools that participated 
+(num_schools = length(unique(big_word_club$school_id)))
+
+# b) Range in the number of student participants per school
+big_word_club %>% 
+    group_by(school_id) %>% 
+    summarise(count = n()) %>% 
+    summarise(min_student = min(count),
+              max_student = max(count))
+
+# c) On average, at which school did students exhibit the greatest and least
+# improvement
+
+big_word_club %>% 
+    group_by(school_id) %>% 
+    summarise(mean_score_change = mean(score_pct_change)) %>% 
+    arrange(mean_score_change) %>% 
+    slice(1, num_schools)
+
+# d) Construct and discuss a plot which illustrates the variability in
+# score_pct_change within and between schools.
+
+school_changes <- big_word_club %>% 
+    group_by( school_id ) %>% 
+    summarize( mean_pct_change = mean(score_pct_change) )
+
+options(repr.plot.width = 15, repr.plot.height = 5)
+
+school_changes %>% 
+    ggplot(aes(x = school_id, y = mean_pct_change)) +
+    geom_point() +
+    theme_minimal()
+
+big_word_club %>% 
+    ggplot(aes(x = school_id, score_pct_change)) +
+    geom_boxplot()
+
+
+big_word_club %>% 
+    ggplot(aes(x = school_id, score_pct_change)) +
+    geom_violin()
+
+# > 16.7 ----
+
+big_word_club %>% glimpse()
+
+
+# > 16.8 ----
+big_word_hierarchical = stan_glmer(
+    score_pct_change ~ (1 | school_id),
+    data = big_word_club, family = gaussian,
+    prior_intercept = normal(50, 2.5, autoscale = TRUE),
+    prior_aux = exponential(1, autoscale = TRUE),
+    prior_covariance = decov(reg = 1, conc = 1, shape = 1, scale = 1),
+    chains = 4, iter = 5000*2, seed = 84735
+)
+
+summary(big_word_hierarchical)
+
+prior_summary(big_word_hierarchical)
+
+mcmc_trace(big_word_hierarchical)
+mcmc_dens_overlay(big_word_hierarchical)
+mcmc_acf(big_word_hierarchical)
+neff_ratio(big_word_hierarchical)
+rhat(big_word_hierarchical)
+
+# 100 posterior simulated datasets of song popularity along with the actual
+pp_check(big_word_hierarchical)
+
+# Store the simulation in a data.frame
+big_word_hierarchical_df = as.data.frame(big_word_hierarchical)
+
+# Check the first 3 and last 3 parameter labels
+total_params = nlevels(big_word_club$school_id) + 3
+total_params_less_3 = total_params - 2
+
+big_word_hierarchical_df %>% 
+    colnames() %>% 
+    as.data.frame() %>% 
+    slice(1:3, 27:29)
+
+# > 16.9 ----
+# Global effects
+# Posterior summary of mu 
+tidy(big_word_hierarchical, effects = "fixed",
+     conf.int = TRUE, conf.level = 0.80)
+
+# Posterior medians for sigma_y and sigma_mu
+tidy(big_word_hierarchical, effects = "ran_pars")
+
+sigma_table <- tidy(big_word_hierarchical, effects = "ran_pars")
+sigma_table
+
+sigma_mu <- sigma_table$estimate[[1]]
+sigma_y <- sigma_table$estimate[[2]]
+
+# Variance explained by within group variation
+sigma_y^2 / (sigma_mu^2 + sigma_y^2)
+
+# Variance explain by between group variation
+sigma_mu^2 / (sigma_mu^2 + sigma_y^2)
+
+# Most of the variance is explained by within school variation
+
+# > 16.10 ----

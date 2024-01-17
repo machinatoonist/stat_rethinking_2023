@@ -412,8 +412,6 @@ big_word_hierarchical = stan_glmer(
     chains = 4, iter = 5000*2, seed = 84735
 )
 
-summary(big_word_hierarchical)
-
 prior_summary(big_word_hierarchical)
 
 mcmc_trace(big_word_hierarchical)
@@ -461,3 +459,89 @@ sigma_mu^2 / (sigma_mu^2 + sigma_y^2)
 # Most of the variance is explained by within school variation
 
 # > 16.10 ----
+school_summary <- tidy(big_word_hierarchical, 
+                       effects = "ran_vals", 
+                       conf.int = TRUE, 
+                       conf.level = 0.80)
+head( school_summary )
+
+# Get MCMC chains for each mu_j
+school_chains <- big_word_hierarchical %>%
+    spread_draws(`(Intercept)`, b[,school_id]) %>% 
+    mutate(mu_j = `(Intercept)` + b) 
+
+head( school_chains )
+
+# Get posterior summaries for each schools's mean score mu_j
+school_summary_scaled = school_chains %>% 
+    select(-`(Intercept)`, -b) %>% 
+    mean_qi(.width = 0.8) %>% 
+    mutate(school_id = fct_reorder(school_id, mu_j))
+
+# Check out the results
+school_summary_scaled %>% 
+    select(school_id, mu_j, .lower, .upper) %>% 
+    head(4)
+
+# 80% credible intervals for each school's mean score
+ggplot(school_summary_scaled,
+       aes(x = school_id, y = mu_j, ymin = .lower, ymax = .upper)) +
+    geom_pointrange() +
+    xaxis_text(angle = 90, hjust = 1)
+
+# Credible interval for mu_10
+school_chains %>% 
+    filter(school_id == "school_id:10") %>% 
+    select(b, mu_j) %>% 
+    mean_qi(.width = 0.8)
+
+school_chains %>%
+    filter(school_id == "school_id:10") %>%
+    summarize(conf.low = quantile(mu_j, 0.1),
+              conf.high = quantile(mu_j, 0.9),
+              mu_lt_5 = mean(mu_j <= 5),
+              mu_gt_5 = mean(mu_j > 5),
+              odds_gt_5 = mu_gt_5/mu_lt_5)
+
+# There is only weak evidence that the improvement is greater than 5% for school 10
+
+# > 16.11 Making predictions ----
+# Manual calculation of prediction
+# >> Prediction for observed group ----
+big_word_hierarchical_df = as.data.frame(big_word_hierarchical)
+
+big_word_hierarchical_df %>% colnames()
+
+num_row = nrow(big_word_hierarchical_df)
+
+school_6_chains = big_word_hierarchical_df %>% 
+    rename(b = `b[(Intercept) school_id:6]`) %>% 
+    select(`(Intercept)`, b, sigma) %>% 
+    mutate(mu_school_6 = `(Intercept)` + b,
+           y_school_6 = rnorm(num_row, mean = mu_school_6, sd = sigma))
+
+head(school_6_chains, 3)
+
+school_6_chains %>% 
+    mean_qi(y_school_6, .width = 0.80)
+
+# Posterior summary of mu_j
+school_summary_scaled %>% 
+    filter(school_id == "school_id:6")
+
+# For an existing school a prediction for a new student at that school is 
+# basically the posterior mean for that school.
+
+# >> Prediction for unobserved group ----
+set.seed(84735)
+bayes_prep_chains = big_word_hierarchical_df %>% 
+    mutate(sigma_mu = sqrt(`Sigma[school_id:(Intercept),(Intercept)]`),
+           mu_bayes_prep = rnorm(num_row, `(Intercept)`, sigma_mu),
+           y_bayes_prep = rnorm(num_row, mu_bayes_prep, sigma))
+
+# Posterior predictive summaries
+bayes_prep_chains %>% 
+    select(`(Intercept)`, contains("bayes_prep")) %>% head(5)
+
+bayes_prep_chains %>% 
+    mean_qi(y_bayes_prep, .width = 0.80)

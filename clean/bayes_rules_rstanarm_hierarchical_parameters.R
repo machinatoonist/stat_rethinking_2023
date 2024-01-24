@@ -170,3 +170,91 @@ sigma_0^2 / (sigma_0^2 + sigma_y^2)
 
 # Fluctuations within runners account for the remaining 13.4%
 sigma_y^2 / (sigma_0^2 + sigma_y^2)
+
+# Hierarchical random intercepts and slopes model ----
+# Plot runner-specific models in the data
+running %>% 
+    filter(runner %in% c("4", "5", "20", "29", "33", "35")) %>% 
+    ggplot(., aes(x = age, y = net)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE) + 
+    facet_wrap(~runner, nrow = 2)
+
+running %>% 
+    ggplot(aes(x = age, y = net, group = runner)) +
+    geom_smooth(method = "lm", se = FALSE, linewidth = 0.5) +
+    theme_minimal()
+
+# > Define model ----
+running_model_2 = stan_glmer(
+    net ~ age + (age | runner),
+    data = running, family = gaussian,
+    prior_intercept = normal(100, 10),
+    prior = normal(2.5, 1),
+    prior_aux = exponential(1, autoscale = TRUE),
+    prior_covariance = decov(regularization = 1, concentration = 1,
+                             shape = 1, scale = 1),
+    chains = 4, iter = 5000*2, seed = 84735, adapt_delta = 0.99999
+)
+
+prior_summary(running_model_2)
+
+library(here)
+saveRDS(running_model_2, file = file.path(here(), "fits/running_model_2.rds"))
+saveRDS(running_model_1, file = file.path(here(), "fits/running_model_1.rds"))
+saveRDS(complete_pooled_model, file = file.path(here(), "fits/complete_pooled_running.rds"))
+
+# Get MCMC chains for the runner-specific intercepts and slopes
+runner_chains_2 = running_model_2 %>% 
+    spread_draws(`(Intercept)`, b[term, runner], `age`) %>% 
+    pivot_wider(names_from = term, names_glue = "b_{term}",
+                values_from = b) %>% 
+    mutate(runner_intercept = `(Intercept)` + `b_(Intercept)`,
+           runner_age = age + b_age)
+
+# Posterior medians of runner-specific models
+runner_summaries_2 = runner_chains_2 %>% 
+    group_by(runner) %>% 
+    summarise(runner_intercept = median(runner_intercept),
+              runner_age = median(runner_age))
+
+head(runner_summaries_2)
+
+runner_summaries_2 %>% 
+    ggplot(aes(y = net, x = age, group = runner)) + 
+    geom_abline(data = runner_summaries_2, color = "gray",
+                aes(intercept = runner_intercept, slope = runner_age)) +
+    lims(x = c(50, 61), y = c(50, 135)) +
+    theme_minimal()
+
+runner_summaries_2 %>% 
+    filter(runner %in% c("runner:1", "runner:10"))
+
+# There is shrinkage to global averages as a result of a small number
+# of samples per runner
+
+# > Posterior analysis of within- and between-group variability ----
+tidy(running_model_2, effects = "ran_pars")
+
+# The sd in the age coefficients beta_1j is likely around 0.25 minutes per year
+# THis is litte variability between runners in terms of the rate at which
+# running times change with age
+
+# The individual runner's net times tend to deviate from their own mean
+# model by roughly 5.17 minutes
+
+# THere's a weak negative correlation of around -0.077 between the 
+# runner specific beta_0j and beta_1j parameters.  Runners that start off
+# faster tend to slow down at a slightly faster rate
+
+# Model evaluation and selection ----
+plot_pooled_model = pp_check(complete_pooled_model) 
+    
+plot_pooled_model + ggplot2::labs(x = "net", 
+                                  title = "complete pooled model")
+
+pp_check(running_model_1) + 
+    labs(x = "net", title = "hierarchical random intercepts model")
+
+pp_check(running_model_2) +
+    labs(x = "net", title = "hierarchical random intercepts and slopes model")

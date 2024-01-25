@@ -7,6 +7,7 @@ library(bayesplot)
 library(tidybayes)
 library(broom.mixed)
 library(forcats)
+library(here)
 
 options(mc.cores = parallel::detectCores())
 
@@ -33,6 +34,10 @@ complete_pooled_model = stan_glm(
     prior_aux = exponential(1, autoscale = TRUE),
     chains = 4, iter = 5000*2, seed = 84735
 )
+
+saveRDS(complete_pooled_model, file = file.path(here(), "fits/complete_pooled_running.rds"))
+complete_pooled_model = readRDS(file = file.path(here(), "fits/complete_pooled_running.rds"))
+
 
 # Posterior summary statistics
 model_summary = tidy(complete_pooled_model, 
@@ -85,6 +90,9 @@ running %>%
 # Simulate the posterior
 running_model_1 = update(running_model_1_prior, prior_PD = FALSE)
 
+saveRDS(running_model_1, file = file.path(here(), "fits/running_model_1.rds"))
+running_model_1 = readRDS(file = file.path(here(), "fits/running_model_1.rds"))
+
 # Check the prior specifications
 prior_summary(running_model_1)
 
@@ -117,7 +125,9 @@ running %>%
     lims(y = c(75, 110))
 
 posterior_draws = running %>% 
-    add_epred_draws(object = running_model_1, ndraws = 200, re_formula = NA)
+    add_epred_draws(object = running_model_1, 
+                    ndraws = 200, 
+                    re_formula = NA)
 
 posterior_draws %>% glimpse()
 
@@ -199,10 +209,8 @@ running_model_2 = stan_glmer(
 
 prior_summary(running_model_2)
 
-library(here)
 saveRDS(running_model_2, file = file.path(here(), "fits/running_model_2.rds"))
-saveRDS(running_model_1, file = file.path(here(), "fits/running_model_1.rds"))
-saveRDS(complete_pooled_model, file = file.path(here(), "fits/complete_pooled_running.rds"))
+running_model_2 = readRDS(file = file.path(here(), "fits/running_model_2.rds"))
 
 # Get MCMC chains for the runner-specific intercepts and slopes
 runner_chains_2 = running_model_2 %>% 
@@ -237,24 +245,79 @@ runner_summaries_2 %>%
 tidy(running_model_2, effects = "ran_pars")
 
 # The sd in the age coefficients beta_1j is likely around 0.25 minutes per year
-# THis is litte variability between runners in terms of the rate at which
+# (see sd_age.runner coefficient)
+# There is little variability between runners in terms of the rate at which
 # running times change with age
 
 # The individual runner's net times tend to deviate from their own mean
-# model by roughly 5.17 minutes
+# model by roughly 5.17 minutes (see sd_Observation.Residual coefficient)
 
-# THere's a weak negative correlation of around -0.077 between the 
+# There's a weak negative correlation of around -0.077 between the 
 # runner specific beta_0j and beta_1j parameters.  Runners that start off
 # faster tend to slow down at a slightly faster rate
 
 # Model evaluation and selection ----
-plot_pooled_model = pp_check(complete_pooled_model) 
-    
-plot_pooled_model + ggplot2::labs(x = "net", 
-                                  title = "complete pooled model")
+plot_pooled_model = pp_check(complete_pooled_model) +
+    labs(x = "net", title = "complete pooled model")
 
 pp_check(running_model_1) + 
     labs(x = "net", title = "hierarchical random intercepts model")
 
 pp_check(running_model_2) +
     labs(x = "net", title = "hierarchical random intercepts and slopes model")
+
+# Calculate prediction summaries
+# Complete pooled model removed because it doesn't make sense to ignore the
+# grouped nature of the running times.
+
+set.seed(84735)
+prediction_summary(model = running_model_1, data = running)
+
+prediction_summary(model = running_model_2, data = running)
+
+# Very similar metrics by all metrics
+
+# We could utilise prediction_summary_cv() to obtain cross validated metrics
+# of posterior predictive accuracy.  Do not run - likely will take long time.
+# predictive_summary_cv(model = running_model_1, data = running, 
+#                       k = 10, group = "runner")
+
+# Calculate expected log-predictive densities (ELPD) ----
+# The estimated ELPD for running_model_1 is lower (worse) than
+# but within 2 standard errors of the running_model_2 ELPD.  This is not
+# a significant difference in posterior predictive accuracy
+elpd_hierarchical_1 = loo(running_model_1)
+elpd_hierarchical_2 = loo(running_model_2)
+
+# In this case the additional complexity of the hierarchical random intercepts
+# and slopes model does not offer any significant benefit over the over the
+# simpler hierarchical random intercepts model.
+# Compare the ELPD
+loo_compare(elpd_hierarchical_1, elpd_hierarchical_2)
+
+# Posterior prediction ----
+# Plot runner-specific trend for runners 1 and 10
+running %>%
+    filter(runner %in% c("1", "10")) %>% 
+    ggplot(., aes(x = age, y = net)) +
+    geom_point() +
+    facet_grid(~runner) +
+    lims(x = c(54, 61))
+
+# Simulate posterior predictive models for the 3 runners
+set.seed(84735)
+predict_next_race = posterior_predict(
+    running_model_1,
+    newdata = data.frame(runner = c("1", "Miles", "10"),
+                         age = c(61, 61, 61))
+)
+
+# Estimate of time from global posterior median model for average runner
+B0 + B1 * 61
+
+# Posterior predictive model plots ----
+mcmc_areas(predict_next_race, prob = 0.8) +
+    ggplot2::scale_y_discrete(labels = c("runner 1", "Miles", "runner 10"))
+
+# Notice how the distribution for Miles is much wider with a median near
+# the global model median because we have no data on him.

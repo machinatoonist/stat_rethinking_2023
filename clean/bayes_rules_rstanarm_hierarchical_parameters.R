@@ -420,7 +420,153 @@ tidy(spotify_model_1, effects = "fixed",
 # - mcmc_areas() offers a useful visual comparison of all genre
 #   posteriors.
 
-# Plot the posterior models of the genre coefficients ----
+# > Plot the posterior models of the genre coefficients ----
 mcmc_areas(spotify_model_1, pars = vars(starts_with("genre")), 
            prob = 0.8) +
     geom_vline(xintercept = 0)
+
+# > Posterior results for 2 artists in our sample ----
+tidy(spotify_model_1, effects = "ran_vals",
+     conf.int = TRUE, conf.level = 0.80) %>% 
+    filter(level %in% c("Camilo", "Missy_Elliott")) %>% 
+    select(level, estimate, conf.low, conf.high)
+
+# Predict the danceability of their next songs
+# Simulate posterior predictive models for the 3 artists
+set.seed(84735)
+predict_next_song = posterior_predict(
+    spotify_model_1,
+    newdata = data.frame(
+        artist = c("Camilo", "Mohsen Beats", "Missy Elliott"),
+        valence = c(80, 60, 90), genre = c("latin", "rock", "rap")
+    ))
+
+# Posterior predictive plots
+mcmc_areas(predict_next_song, prob = 0.80) +
+    ggplot2::scale_y_discrete(
+        labels = c("Camilo", "Mohsen Beats", "Missy Elliott")
+    )
+
+# Note that the use of normal() priors has resulted in results for
+# danceability that are greater than 100.  A beta prior could potentially
+# be used to constrain danceability between 0 and 100.
+
+# End of Chapter Exercises ----
+# > 17.6 ----
+# From https://github.com/chuwyler/bayesrules/blob/main/ipynb/Chapter17_Exercises.ipynb
+library(tidyverse)
+library(bayesrules)
+library(bayesplot)
+library(rstan)
+library(rstanarm)
+library(broom.mixed)
+library(tidybayes)
+library(forcats)
+library(lme4)
+# use multiple cores, otherwise hierarchical models with random slopes and intercepts are terribly slow
+options(mc.cores = parallel::detectCores()) 
+
+data("sleepstudy")
+sleepstudy %>% glimpse()
+sleepstudy %>% 
+    ggplot(aes(x = Days, y = Reaction)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE) +
+    facet_wrap(~Subject) +
+    labs(
+        title = "Reaction times increase with sleep deprivation"
+    )
+
+# > 17.7 ----
+# Hierarchical random intercepts model
+sleep_model_1 = stan_glmer(formula = Reaction ~ Days + (1 | Subject),
+                           data = sleepstudy,
+                           family = gaussian, 
+                           prior_intercept = normal(250, 25, autoscale = TRUE),
+                           prior = normal(0, 2.5, autoscale = TRUE),
+                           prior_aux = exponential(1, autoscale = TRUE),
+                           prior_covariance = decov(regularization = 1, concentration = 1,
+                                                    shape = 1, scale = 1),
+                           chains = 4, iter = 5000*2, seed = 84735)
+
+# Hierarchical random intercepts and slopes model
+sleep_model_2 = stan_glmer(formula = Reaction ~ Days + (Days | Subject),
+                           data = sleepstudy,
+                           family = gaussian, 
+                           prior_intercept = normal(250, 25, autoscale = TRUE),
+                           prior = normal(0, 2.5, autoscale = TRUE),
+                           prior_aux = exponential(1, autoscale = TRUE),
+                           prior_covariance = decov(regularization = 1, concentration = 1,
+                                                    shape = 1, scale = 1),
+                           chains = 4, iter = 5000*2, seed = 84735)
+
+pp_check(sleep_model_1)
+pp_check(sleep_model_2)
+
+prior_summary(sleep_model_1)
+
+tidy(sleep_model_1, conf.int = TRUE, conf.level = 0.80, effects = "ran_pars")
+
+# > Posterior analysis of global relationships ----
+sleep_summary_1 = tidy(sleep_model_1,
+                      effects = "fixed",
+                      conf.int = TRUE,
+                      conf.level = 0.80)
+
+sleep_summary_1
+
+sleep_summary_2 = tidy(sleep_model_2,
+                       effects = "fixed",
+                       conf.int = TRUE,
+                       conf.level = 0.80)
+
+sleep_summary_2
+
+# Reaction = 251 + 10.5 * Days
+
+# >> 17.7c ----
+# Posterior samples
+set.seed(84735)
+sleep_chains_2 <- sleep_model_2 %>%
+    spread_draws(`(Intercept)`, b[term, Subject], `Days`) %>%
+    pivot_wider(names_from = term,
+                names_glue = "b_{term}",
+                values_from = b) %>%
+    mutate(subject_intercept = `(Intercept)` + `b_(Intercept)`,
+           subject_Days = Days + b_Days)
+
+head(sleep_chains_2)
+
+# 80% confidence interval for the days regression coefficient: subject_Days 
+sleep_chains_2  %>%
+    group_by(Subject) %>%
+    summarize(
+        Days_lower = quantile(subject_Days, 0.1),
+        Days_upper = quantile(subject_Days, 0.9)
+    ) %>%
+    arrange(Subject)
+
+
+# Posterior medians for sigma_y, sigma_0, sigma_1, p
+sleep_chains_2 %>% 
+    ungroup() %>% 
+    summarise(
+        b_intercept = median(`b_(Intercept)`),
+        b_days = median(b_Days)
+    )
+
+tidy(sleep_model_2, effects = "ran_pars")
+
+tidy_sigma = tidy(sleep_model_2, effects = "ran_pars")
+
+# sigma_y represents within group variability and is relatively small
+(sigma_y = tidy_sigma$estimate[2])
+
+# sigma_0 represents between group variable and is relatively large
+(sigma_0 = tidy_sigma$estimate[1])
+
+# Differences between subjects account for roughly 92.3% of the total variability in reaction time
+sigma_0^2 / (sigma_0^2 + sigma_y^2)
+
+# Fluctuations within subjects account for the remaining 7.6%
+sigma_y^2 / (sigma_0^2 + sigma_y^2)

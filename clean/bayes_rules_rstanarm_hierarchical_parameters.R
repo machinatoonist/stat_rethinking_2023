@@ -321,3 +321,106 @@ mcmc_areas(predict_next_race, prob = 0.8) +
 
 # Notice how the distribution for Miles is much wider with a median near
 # the global model median because we have no data on him.
+
+# Longitudinal data ----
+# There may be a reason to believe that the correlation with time
+# may not be the same across time.  For example, a runner's net time
+# at age 60 is likely more strongly correlated with net time than
+# at age 59 or 50
+
+# See bayeslongitudinal R package and Laird and Ware (1982)
+
+# Hierarchical model for danceability ----
+
+data("spotify")
+
+spotify = spotify %>% 
+    select(artist, title, danceability, valence, genre)
+
+ggplot(spotify, aes(x = genre, danceability)) +
+    geom_boxplot()
+ggplot(spotify, aes(x = valence, y = danceability)) +
+    geom_point()
+ggplot(spotify, aes(x = valence, y = danceability, group = artist)) +
+    geom_smooth(method = "lm", se = FALSE, linewidth = 0.5)
+
+# Some artist's songs tend to be more danceable than others
+# The association between danceability and valence might differe among artists
+
+# song i with artist j, let Yijdenote danceability and Xij1 denote valence
+# With Xij1 being edm as a baseline
+
+# The global coefficients reflect an assumption that the relationship
+# danceability, valence, and genre are similar for each artist
+
+# The artist specific intercepts beta_0j assume that when holding constant
+# a song's valence and genre, some artist's songs tend to be more
+# danceable than others
+spotify_model_1 = stan_glmer(
+    danceability ~ valence + genre + (1 | artist),
+    data = spotify, family = gaussian,
+    prior_intercept = normal(50, 2.5, autoscale = TRUE),
+    prior = normal(0, 2.5, autoscale = TRUE),
+    prior_aux = exponential(1, autoscale = TRUE),
+    prior_covariance = decov(regularization = 1, concentration = 1,
+                             shape = 1, scale = 1),
+    chains = 4, iter = 5000*2, seed = 84735
+)
+
+# Model 2 assumes the relationship between danceability and valence
+# might differ by artist
+spotify_model_2 = stan_glmer(
+    danceability ~ valence + genre + (valence | artist),
+    data = spotify, family = gaussian,
+    prior_intercept = normal(50, 2.5, autoscale = TRUE),
+    prior = normal(0, 2.5, autoscale = TRUE),
+    prior_aux = exponential(1, autoscale = TRUE),
+    prior_covariance = decov(regularization = 1, concentration = 1,
+                             shape = 1, scale = 1),
+    chains = 4, iter = 5000*2, seed = 84735
+)
+
+pp_check(spotify_model_1) +
+    labs(title = "Hierarchical random intercepts",
+         x = "danceability")
+
+pp_check(spotify_model_2) +
+    labs(title = "Hierarchical random intercepts and slopes",
+         x = "danceability")
+
+# Calculate ELPD for the 2 models ----
+elpd_spotify_1 = loo(spotify_model_1)
+elpd_spotify_2 = loo(spotify_model_2)
+
+# Compare the ELPD ----
+loo_compare(elpd_spotify_1, elpd_spotify_2)
+
+# Comparing model 1 and 2 there is no significant difference so
+# we select model 1 for simplicity
+
+# Posterior summary ----
+tidy(spotify_model_1, effects = "fixed", 
+     conf.int = TRUE, conf.level = 0.80)
+
+
+# Interpretation of Model 1 parameters:
+# danceability ~ valence + genre + (1 | artist)
+# - For the average artist (group) in any genre (global regressor)
+#   we'd expect danceability to increase by between 2.16 and 3.01
+#   points for every 10 point increase on the valence scale
+# - Among genres, controlling for valence, only rock is 
+#   significantly less danceable than edm (electronic dance music)
+#   It's credible interval is the only one to lie entirely above
+#   or below 0.  For the average rock song the danceability is
+#   between 1.36 and 12 points lower than that of an edm song with
+#   the same valence.
+# - When interpreting these summaries, keep in mind that the
+#   genre coefficients directly compare each genre to edm alon and
+#   not, say, rock to r&b.
+# - mcmc_areas() offers a useful visual comparison of all genre
+#   posteriors.
+
+# Plot the posterior models of the genre coefficients ----
+mcmc_areas(spotify_model_1, pars = vars(starts_with("genre")), 
+           prob = 0.8) +
+    geom_vline(xintercept = 0)

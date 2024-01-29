@@ -452,6 +452,7 @@ mcmc_areas(predict_next_song, prob = 0.80) +
 # be used to constrain danceability between 0 and 100.
 
 # End of Chapter Exercises ----
+# Sleep deprivation, reaction time study ----
 # > 17.6 ----
 # From https://github.com/chuwyler/bayesrules/blob/main/ipynb/Chapter17_Exercises.ipynb
 library(tidyverse)
@@ -507,7 +508,6 @@ prior_summary(sleep_model_1)
 
 tidy(sleep_model_1, conf.int = TRUE, conf.level = 0.80, effects = "ran_pars")
 
-# > Posterior analysis of global relationships ----
 sleep_summary_1 = tidy(sleep_model_1,
                       effects = "fixed",
                       conf.int = TRUE,
@@ -524,7 +524,7 @@ sleep_summary_2
 
 # Reaction = 251 + 10.5 * Days
 
-# >> 17.7c ----
+# > 17.7c ----
 # Posterior samples
 set.seed(84735)
 sleep_chains_2 <- sleep_model_2 %>%
@@ -555,18 +555,101 @@ sleep_chains_2 %>%
         b_days = median(b_Days)
     )
 
-tidy(sleep_model_2, effects = "ran_pars")
-
 tidy_sigma = tidy(sleep_model_2, effects = "ran_pars")
+tidy_sigma
 
-# sigma_y represents within group variability and is relatively small
-(sigma_y = tidy_sigma$estimate[2])
+# sigma_1
+(sigma_1 = tidy_sigma$estimate[2])
 
-# sigma_0 represents between group variable and is relatively large
+# sigma_0 
 (sigma_0 = tidy_sigma$estimate[1])
 
-# Differences between subjects account for roughly 92.3% of the total variability in reaction time
-sigma_0^2 / (sigma_0^2 + sigma_y^2)
+# rho
+(rho = tidy_sigma$estimate[3])
 
-# Fluctuations within subjects account for the remaining 7.6%
-sigma_y^2 / (sigma_0^2 + sigma_y^2)
+# sigma_y
+(sigma_y = tidy_sigma$estimate[4])
+
+# Differences between subjects account for roughly 93.3% of the total variability in reaction time
+sigma_y^2 / (sigma_1^2 + sigma_y^2)
+
+# Fluctuations within subjects account for the remaining 6.7%
+sigma_1^2 / (sigma_1^2 + sigma_y^2)
+
+# > 17.8 ----
+# a) Identify the person for whom reaction times change the least
+# ans: Subject:335 
+sleep_chains_2 %>% 
+    select(Subject, subject_intercept, subject_Days) %>% 
+    group_by(Subject) %>% 
+    summarise(subject_intercept = median(subject_intercept),
+              subject_Days = median(subject_Days)) %>% 
+    arrange(subject_Days)
+
+# Posterior regression model for subject 335: Reaction time = 250 - 0.229 * Days
+
+# b) The person with the largest change in reaction time
+# ans: Subject:308 -> Reaction time = 254 + 19.6 * Days
+sleep_chains_2 %>% 
+    select(Subject, subject_intercept, subject_Days) %>% 
+    group_by(Subject) %>% 
+    summarise(subject_intercept = median(subject_intercept),
+              subject_Days = median(subject_Days)) %>% 
+    arrange(-subject_Days)
+
+# c) The person with the slowest baseline reaction time
+# ans: Subject:337 -> Reaction time = 283 + 19.6 * Days
+sleep_chains_2 %>% 
+    select(Subject, subject_intercept, subject_Days) %>% 
+    group_by(Subject) %>% 
+    summarise(subject_intercept = median(subject_intercept),
+              subject_Days = median(subject_Days)) %>% 
+    arrange(-subject_intercept)
+
+# d) The person with the fastest baseline reaction time
+# ans: Subject:309 -> Reaction time = 215 + 1.27 * Days
+sleep_chains_2 %>% 
+    select(Subject, subject_intercept, subject_Days) %>% 
+    group_by(Subject) %>% 
+    summarise(subject_intercept = median(subject_intercept),
+              subject_Days = median(subject_Days)) %>% 
+    arrange(subject_intercept)
+
+# e) Simulate, plot and discuss the posterior predictive model of reaction time
+# after 5 days of sleep deprivation for two subjects:you and Subject 308 
+
+set.seed(84735)
+sleep_model_2_df <- data.frame( sleep_model_2 ) 
+sleep_model_2_df %>%
+    transmute(
+        subject_intercept = X.Intercept. + b..Intercept..Subject.308.,
+        subject_slope = Days + b.Days.Subject.308.,
+        sigma_y = sigma
+    ) %>%
+    mutate(mu = subject_intercept + 5 * subject_slope) %>%
+    mutate(ynew = rnorm(nrow(sleep_model_2_df), mean = mu, sd = sigma_y)) %>%
+    summarize(
+        ynew_median = median(ynew),
+        ynew_lower = quantile(ynew, 0.1),
+        ynew_upper = quantile(ynew, 0.9)
+    )
+
+sleepstudy %>% head()
+predict_reaction_time = posterior_predict(
+    sleep_model_2,
+    newdata = data.frame(
+        Subject = c("Me", "308"),
+        Days = c(5, 5)
+    ))
+
+data.frame(predict_reaction_time) %>%
+    rename(me = X1, subject_308 = X2) %>%
+    summarize_all(list(median = median, 
+                       sd = sd, 
+                       lower = ~ quantile(.x, probs = 0.1),
+                       upper = ~ quantile(.x, probs = 0.9)))
+
+??summarize_all()
+
+mcmc_areas(predict_reaction_time, prob = 0.8) +
+    ggplot2::scale_y_discrete(labels = c("me", "Subject 308"))

@@ -478,7 +478,8 @@ sleepstudy %>%
         title = "Reaction times increase with sleep deprivation"
     )
 
-# > 17.7 ----
+# > 17.7 Posterior simulation ----
+# https://www.bayesrulesbook.com/chapter-17#hierarchical-model-with-varying-intercepts-slopes
 # Hierarchical random intercepts model
 sleep_model_1 = stan_glmer(formula = Reaction ~ Days + (1 | Subject),
                            data = sleepstudy,
@@ -576,7 +577,8 @@ sigma_y^2 / (sigma_1^2 + sigma_y^2)
 # Fluctuations within subjects account for the remaining 6.7%
 sigma_1^2 / (sigma_1^2 + sigma_y^2)
 
-# > 17.8 ----
+# > 17.8 Posterior Prediction ----
+# https://www.bayesrulesbook.com/chapter-17#posterior-prediction-2
 # a) Identify the person for whom reaction times change the least
 # ans: Subject:335 
 sleep_chains_2 %>% 
@@ -634,6 +636,8 @@ sleep_model_2_df %>%
         ynew_upper = quantile(ynew, 0.9)
     )
 
+??transmute()
+
 sleepstudy %>% head()
 predict_reaction_time = posterior_predict(
     sleep_model_2,
@@ -653,3 +657,399 @@ data.frame(predict_reaction_time) %>%
 
 mcmc_areas(predict_reaction_time, prob = 0.8) +
     ggplot2::scale_y_discrete(labels = c("me", "Subject 308"))
+
+# > 17.9 Model evaluation ----
+# https://www.bayesrulesbook.com/chapter-17#model-evaluation-selection
+pp_check(sleep_model_1)
+pp_check(sleep_model_2)
+
+# Slightly lower MAE for model 2
+prediction_summary(sleep_model_1, data = sleepstudy)
+prediction_summary(sleep_model_2, data = sleepstudy)
+
+# expected log-predictive densities (ELPD)
+elpd1 <- loo(sleep_model_1, k_threshold = 0.7)
+elpd2 <- loo(sleep_model_2, k_threshold = 0.7)
+loo_compare(elpd1, elpd2)
+
+# > 17.11 Voices study ----
+# a)
+data("voices")
+voices %>% glimpse()
+unique(voices$subject) %>% length()
+voices %>% na.omit() %>% 
+    count(subject)
+
+voices %>% View()
+
+voices = voices %>% 
+    mutate(subject = fct_reorder(subject, pitch, .fun = 'mean', .na_rm = TRUE))
+
+voices %>% 
+    ggplot(aes(x = subject, y = pitch)) +
+    geom_violin(aes(fill = subject)) +
+    geom_jitter() +
+    labs(
+        title = "Pitch variation by subject"
+    ) +
+    theme_minimal() +
+    theme(legend.position = "none")
+
+
+voices %>% 
+    ggplot(aes(x = subject, y = pitch)) +
+    geom_boxplot(aes(fill = subject)) +
+    geom_jitter() +
+    labs(
+        title = "Pitch variation by subject"
+    ) +
+    theme_minimal() +
+    theme(legend.position = "none")
+
+# b
+voices %>% na.omit() %>% 
+    ggplot(aes(x = attitude, y = pitch, color = subject, group = subject)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE) +
+    facet_grid(~subject) +
+    labs(title = "Voice Pitch Changes with Attitude") +
+    theme_minimal()
+
+ggplot(voices %>% na.omit(), aes(x = subject, 
+                                 y = pitch, 
+                                 color = attitude)) + 
+    geom_boxplot() 
+
+# > 17.12 ----
+mean(voices$pitch, na.rm = TRUE)
+
+voice_model = stan_glmer(
+    pitch ~ attitude + (1 | subject),
+    data = voices, family = gaussian,
+    prior_intercept = normal(200, 50, autoscale = TRUE),
+    prior = normal(2.5, 1, autoscale = TRUE),
+    prior_aux = exponential(1, autoscale = TRUE),
+    prior_covariance = decov(reg = 1, concentration = 1,
+                             shape = 1, scale = 1),
+    chains = 4, iter = 5000*2, seed = 84735)
+
+pp_check(voice_model)
+
+prediction_summary(voice_model, data = voices %>% na.omit())
+
+mcmc_trace(voice_model)
+mcmc_dens(voice_model)
+mcmc_acf(voice_model)
+
+data.frame(voice_model) %>% glimpse()
+
+voice_model %>% 
+    spread_draws(`(Intercept)`, b[,subject]) %>% 
+    mutate(subject_intercept = `(Intercept)` + b) %>% 
+    select(-`(Intercept)`, -b) %>% 
+    median_qi(.width = 0.80) %>% 
+    select(subject, subject_intercept, .lower, .upper)
+
+# Posterior summary statistics
+voice_model_summary = tidy(voice_model, 
+                           conf.int = TRUE,
+                           conf.level = 0.95)
+
+tidy(voice_model, effects = "fixed", conf.int = TRUE, conf.level = 0.95)
+
+
+voice_model_summary
+
+# Posterior median model
+(B0 = voice_model_summary$estimate[1])
+(B1 = voice_model_summary$estimate[2])
+
+# That the 95% confidence interval does not include 0 is clear evidence that 
+# there is a non-zero effect of attitude on pitch
+
+# > 17.13 ----
+# pitch = 203 -19.4 * X 
+# where:     X = 0 for attitude = "formal" 
+#            X = 1 for attitude = "polite"
+
+voices %>% 
+    # filter(attitude == "polite") %>% 
+    group_by(attitude) %>% 
+    summarise(mean_pitch_polite = median(pitch, na.rm = TRUE))
+
+voices %>% 
+    filter(subject %in% c("A", "F")) %>% 
+    group_by(attitude, subject) %>% 
+    summarise(mean_pitch_polite = median(pitch, na.rm = TRUE))
+
+summary(voice_model)
+subject_summary = spread_draws(voice_model, `(Intercept)`, b[,subject]) %>%
+    mutate(voice_intercept = `(Intercept)` + b) %>% 
+    select(-`(Intercept)`, -b) %>% 
+    median_qi(.width = 0.80) %>% 
+    select(subject, voice_intercept, .lower, .upper)
+
+subject_summary
+
+# A: pitch = 259 - 19.4 * X
+# F: pitch = 179 - 19.4 * X
+
+set.seed(84735)
+predict_new_pitch = posterior_predict(
+    voice_model,
+    newdata = data.frame(subject = c("A", "F", "You"),
+                         attitude = c("polite", "polite", "polite"))
+)
+
+
+# Posterior predictive model plots ----
+mcmc_areas(predict_new_pitch, prob = 0.8) +
+    ggplot2::scale_y_discrete(labels = c("A", "F", "You"))
+
+summary(predict_new_pitch)
+
+data.frame(predict_new_pitch) %>% 
+    rename(A = X1, F = X2, You = X3) %>% 
+    summarize(across(everything(), median))
+
+# 'You' is much wider because there is more uncertainty about the intercept
+
+# > 17.14 Coffee ratings ----
+# >> Hierarchical model with no parameters ----
+data("coffee_ratings_small")
+
+cf = coffee_ratings_small
+
+cf %>% glimpse()
+# The obvious hierarchy in this dataset is farm name but there is an issue,
+# many examples have NA as the farm name, in fact the majority of examples
+# have no farm listed.
+cf %>% 
+    count(farm_name, sort = TRUE)
+
+cf %>% nrow()
+cf %>% na.omit() %>% nrow()
+
+# The most likely outcome variable to predict from this dataset is total_cup_points
+# We might want to predict total cup points based purely on the farm name.
+# Let's build a simple model for this.
+
+cf_clean_df = cf %>% 
+    na.omit() %>% 
+    mutate(farm_name = fct_reorder(farm_name, total_cup_points, .fun = 'mean'))
+
+
+cf_clean_df %>% 
+    group_by(farm_name) %>% 
+    summarise(median_pts = median(total_cup_points),
+                          sd_pt = sd(total_cup_points))
+
+coffee_model_1 = stan_glmer(
+    formula = total_cup_points ~ (1|farm_name),
+    data = cf_clean_df, family = gaussian,
+    prior_intercept = normal(80, 2.5, autoscale = TRUE),
+    prior_aux = exponential(1, autoscale = TRUE),
+    prior_covariance = decov(reg = 1, conc = 1, shape = 1, scale = 1),
+    chains = 4, iter = 5000*2, seed = 84735
+)
+
+pp_check(coffee_model_1)
+
+mcmc_trace(coffee_model_1)
+mcmc_dens(coffee_model_1)
+
+prior_summary(coffee_model_1)
+neff_ratio(coffee_model_1)
+rhat(coffee_model_1)
+
+# Posterior summary statistics
+coffee_model_summary = tidy(coffee_model_1, 
+                            conf.int = TRUE, 
+                            conf.level = 0.80)
+
+coffee_model_summary
+
+range(cf_clean_df$total_cup_points)
+
+cf_clean_df %>% 
+    group_by(farm_name) %>% 
+    summarise(count = n()) %>% 
+    summarise(min_blends = min(count),
+              max_blends = max(count))
+
+# Some farms are not well represented so we might expect greater variation in
+# coffee from these locations
+
+mean_farm_ratings = cf_clean_df %>% 
+    group_by(farm_name) %>% 
+    summarise(total_cup_points = mean(total_cup_points),
+              flavor = mean(flavor),
+              uniformity = mean(uniformity))
+
+mean_farm_ratings %>% glimpse()
+
+set.seed(84735)
+mean_predictions = posterior_predict(
+    coffee_model_1, newdata = mean_farm_ratings
+)
+
+
+# Plot the posterior predictive intervals
+ppc_intervals(mean_farm_ratings$total_cup_points, yrep = mean_predictions,
+              prob_outer = 0.80) +
+    ggplot2::scale_x_continuous(labels = mean_farm_ratings$farm_name,
+                                breaks = 1:nrow(mean_farm_ratings)) +
+    xaxis_text(angle = 90, hjust = 1)
+
+ggplot(mean_farm_ratings, aes(x = total_cup_points)) +
+    geom_density()
+
+# >> Hierarchical model with random intercepts ----
+cf_clean_df %>% glimpse()
+
+
+# Select numerical columns except for total_cup_points and farm_name
+numerical_vars <- cf_clean_df %>% 
+    select(-farm_name, -total_cup_points) %>% 
+    names()
+
+# Melt the data frame to long format for plotting
+cf_long <- cf_clean_df %>% 
+    pivot_longer(cols = all_of(numerical_vars), 
+                 names_to = "Variable", 
+                 values_to = "Value")
+
+# Plot
+ggplot(cf_long, aes(x = Value, y = total_cup_points)) +
+    geom_point(alpha = 0.5) + # Use alpha to adjust point opacity if there are many points
+    facet_wrap(~Variable, scales = "free_x") + # Use 'scales = "free_x"' to allow each plot to have its own x-axis scale
+    labs(x = "Variable Value", y = "Total Cup Points", title = "Relationship of Total Cup Points with Other Parameters") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+library(GGally)
+cf_numerical <- cf_clean_df %>% 
+    select(-farm_name)
+
+ggpairs(cf_numerical)
+
+options(repr.plot.width = 15, repr.plot.height = 15)
+pairs(cf_clean_df  %>% select_if(is.numeric))
+cor( cf_clean_df  %>% select_if( is.numeric ) ) %>% View()
+
+coffee_model_2 = stan_glmer(
+    formula = total_cup_points ~ flavor + (1 | farm_name),
+    data = cf_clean_df, family = gaussian,
+    prior_intercept = normal(81, 8, autoscale = TRUE),
+    prior = normal(2.5, 1, autoscale = TRUE),
+    prior_aux = exponential(1, autoscale = TRUE),
+    prior_covariance = decov(reg = 1, concentration = 1,
+                             shape = 1, scale = 1),
+    chains = 4, iter = 5000*2, seed = 84735)
+
+
+pp_check(coffee_model_2)
+
+# >> Hierarchical model with random intercepts and slopes ----
+# Takes much longer to fit
+coffee_model_3 = stan_glmer(
+    formula = total_cup_points ~ flavor + (flavor | farm_name),
+    data = cf_clean_df, family = gaussian,
+    prior_intercept = normal(81, 8, autoscale = TRUE),
+    prior = normal(2.5, 1, autoscale = TRUE),
+    prior_aux = exponential(1, autoscale = TRUE),
+    prior_covariance = decov(reg = 1, concentration = 1,
+                             shape = 1, scale = 1),
+    chains = 4, iter = 5000*2, seed = 84735)
+
+pp_check(coffee_model_3)
+
+# >> Hierarchical model with random intercepts - 2 variables ----
+# I selected flavor and uniformity as regressors because they are correlated
+# with total cup points but are not strongly correlated with each other
+coffee_model_4 = stan_glmer(
+    formula = total_cup_points ~ flavor + uniformity + (1 | farm_name),
+    data = cf_clean_df, family = gaussian,
+    prior_intercept = normal(81, 8, autoscale = TRUE),
+    prior = normal(2.5, 1, autoscale = TRUE),
+    prior_aux = exponential(1, autoscale = TRUE),
+    prior_covariance = decov(reg = 1, concentration = 1,
+                             shape = 1, scale = 1),
+    chains = 4, iter = 5000*2, seed = 84735)
+
+
+pp_check(coffee_model_4)
+
+
+# Calculate ELPD for the 2 models ----
+# Model 4 is significantly better than model 2 without too much additional
+# complexity
+elpd_coffee_2 = loo(coffee_model_2)
+
+
+
+
+elpd_coffee_4 = loo(coffee_model_4)
+
+# Compare the ELPD ----
+loo_compare(elpd_coffee_2, elpd_coffee_4)
+
+
+prediction_summary(model = coffee_model_2, 
+                   data = cf_clean_df %>% na.omit())
+
+prediction_summary(model = coffee_model_4, 
+                   data = cf_clean_df %>% na.omit())
+
+
+# >> Posterior summary ----
+
+# >>> Global average model ----
+
+tidy(coffee_model_4, effects = "fixed", 
+     conf.int = TRUE, conf.level = 0.80)
+# Total cup points = 20.5 + 5.28 * flavor + 2.22 * uniformity
+
+# >>> Variability ----
+
+tidy_sigma = tidy(coffee_model_4, effects = "ran_pars")
+tidy_sigma
+
+# sigma_y represents within group variability and is relatively small
+(sigma_y = tidy_sigma$estimate[2])
+
+# sigma_0 represents between group variable and is relatively large
+(sigma_0 = tidy_sigma$estimate[1])
+
+# Differences between farms account for roughly 20.3% of the total variability in cup points
+sigma_0^2 / (sigma_0^2 + sigma_y^2)
+
+# Fluctuations within blends account for the remaining 79.7%
+sigma_y^2 / (sigma_0^2 + sigma_y^2)
+
+# >>> Ranking farms ----
+cf_clean_df %>% 
+    ggplot(aes(x = flavor, y = total_cup_points, fill = farm_name)) + 
+    geom_boxplot()
+
+coffee_summary <- coffee_model_4 %>%
+    spread_draws(`(Intercept)`, b[,farm_name]) %>% # extract dataframe
+    mutate(farm_name_intercept = `(Intercept)` + b) %>% # compute individual runner intercepts
+    select(-`(Intercept)`, -b) %>% # drop global intercept and b
+    median_qi(.width = 0.80) %>%  # compute credible intervals
+    select(farm_name, farm_name_intercept, .lower, .upper)
+
+coffee_summary %>% arrange( desc(farm_name_intercept) )
+
+
+set.seed(84735)
+mean_coffee_predictions = posterior_predict(
+    coffee_model_4, newdata = mean_farm_ratings
+)
+
+# Plot the posterior predictive intervals
+ppc_intervals(mean_farm_ratings$total_cup_points, yrep = mean_coffee_predictions,
+              prob_outer = 0.80) +
+    ggplot2::scale_x_continuous(labels = mean_farm_ratings$farm_name,
+                                breaks = 1:nrow(mean_farm_ratings)) +
+    xaxis_text(angle = 90, hjust = 1)

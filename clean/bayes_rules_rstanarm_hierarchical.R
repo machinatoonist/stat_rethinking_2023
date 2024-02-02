@@ -19,7 +19,7 @@ spotify %>% glimpse()
 # number of songs 
 nrow(spotify)
 
-# number of artists
+# number of artist
 nlevels(spotify$artist)
 
 # Group means : artist means ----

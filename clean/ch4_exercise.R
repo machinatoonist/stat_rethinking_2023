@@ -15,7 +15,8 @@ break_func = function(x) {
 }
 
 ggplot() +
-    stat_histinterval(aes(x = pos), .width = c(0.66, 0.89), breaks = break_func) +
+    # stat_histinterval(aes(x = pos), .width = c(0.66, 0.89), breaks = break_func) +
+    stat_histinterval(aes(x = pos), .width = c(0.66, 0.89)) +
     labs(x = "Position", y = "Density")
 
 histo = function(p, int = 1) {
@@ -25,9 +26,11 @@ histo = function(p, int = 1) {
     }
     
     ggplot() +
-        stat_histinterval(aes(x = p), .width = c(0.66, 0.89), breaks = break_func) +
+        stat_histinterval(aes(x = p), .width = c(0.66, 0.89)) +
         labs(x = "Position", y = "Density")
 }
+
+histo(pos)
 
 library(rethinking)
 

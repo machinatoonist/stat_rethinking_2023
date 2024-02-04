@@ -175,4 +175,92 @@ beta_2 = global_params$estimate[3]
  tidy(climb_model, effects = "ran_pars", conf.int = TRUE, conf.level = 0.80)
  tidy(climb_model, effects = "ran_vals", conf.int = TRUE, conf.level = 0.80)
  
- 
+ # Plot 100 posterior plausible alternative models
+ climbers %>% 
+     add_epred_draws(climb_model, ndraws = 100, re_formula = NA) %>% 
+     ggplot(aes(x = age, y = success, color = oxygen_used)) +
+     geom_line(aes(y = .epred, group = paste(oxygen_used, .draw)),
+               alpha = 0.1) +
+     labs(title = "Effect of age and oxygen on success rate for observed expeditions",
+          y = "probability of success") +
+     theme_minimal()
+
+ # Posterior classification ----
+ # New expedition
+ new_expedition = data.frame(
+     age = c(20, 20, 60, 60), oxygen_used = c(FALSE, TRUE, FALSE, TRUE),
+     expedition_id = rep("new", 4))
+
+ new_expedition
+
+ # Posterior predictions of binary outcome
+ set.seed(84735)
+binary_prediction = posterior_predict(climb_model, newdata = new_expedition) 
+
+# First 3 prediction sets
+head(binary_prediction, 3)
+
+# Summarise the posterior predictions of Y
+# These probabilities incorporate uncertainty in the baseline success rate of the
+# new expedition and are more moderate than plot of success rates for expeditions
+# that we have observed.
+colMeans(binary_prediction)
+
+# Model evaluation
+set.seed(84735)
+class_summary = classification_summary(data = climbers, model = climb_model, cutoff = 0.5)
+{ 
+# classification_summary = function(model, data, cutoff = 0.5) {
+#     if (!("stanreg" %in% class(model))) {
+#         stop("the model must be a stanreg object.")
+#     }
+#     predictions <- posterior_predict(model, newdata = data)
+#     if ("lmerMod" %in% class(model)) {
+#         y <-
+#             as.data.frame(data %>% dplyr::select(as.character(model$formula)[2]))[,
+#                                                                                   1]
+#     }
+#     else {
+#         y <- as.data.frame(data %>% dplyr::select(model$terms[[2]]))[,
+#                                                                      1]
+#     }
+#     classifications <-
+#         data.frame(proportion = colMeans(predictions)) %>%
+#         mutate(classification = as.numeric(proportion >= cutoff)) %>%
+#         mutate(y = y)
+#     confusion_matrix <- classifications %>% tabyl(y, classification)
+#     if (ncol(confusion_matrix) == 2) {
+#         if ("1" %in% names(confusion_matrix)) {
+#             confusion_matrix <- confusion_matrix %>% mutate(`0` = rep(0,
+#                                                                       nrow(.)))
+#         }
+#         if ("0" %in% names(confusion_matrix)) {
+#             confusion_matrix <- confusion_matrix %>% mutate(`1` = rep(0,
+#                                                                       nrow(.)))
+#         }
+#     }
+#     mat <- as.matrix(confusion_matrix[, -1])
+#     sensitivity <- mat[2, 2] / sum(mat[2, ])
+#     specificity <- mat[1, 1] / sum(mat[1, ])
+#     overall_accuracy <- sum(diag(mat)) / sum(mat)
+#     accuracy_rates <- data.frame(c(sensitivity, specificity,
+#                                    overall_accuracy))
+#     row.names(accuracy_rates) <- c("sensitivity", "specificity",
+#                                    "overall_accuracy")
+#     names(accuracy_rates) <- ""
+#     return(list(confusion_matrix = confusion_matrix, accuracy_rates = accuracy_rates))
+# }
+}
+
+class_summary$confusion_matrix
+
+class_summary$accuracy_rates
+
+# Model successfully predicts the outcomes for 91.7% of climbers
+# Given the consequences of misclassification we should prioritise specificity, 
+# our ability to anticipate when a climber might not succeed.  92.5%  To increase
+# specificity we can increase the cutoff.
+classification_summary(data = climbers, model = climb_model, cutoff = 0.65)
+
+# Increasing specificity reduces our ability to predict when a climber will be successful
+# i.e. our false negative rate does up

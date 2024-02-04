@@ -1053,3 +1053,46 @@ ppc_intervals(mean_farm_ratings$total_cup_points, yrep = mean_coffee_predictions
     ggplot2::scale_x_continuous(labels = mean_farm_ratings$farm_name,
                                 breaks = 1:nrow(mean_farm_ratings)) +
     xaxis_text(angle = 90, hjust = 1)
+# > 17.15 ----
+library(lme4)
+data("sleepstudy")
+sleepstudy %>% glimpse()
+sleepstudy %>% 
+    ggplot(aes(x = Days, y = Reaction)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE) +
+    facet_wrap(~Subject) +
+    labs(
+        title = "Reaction times increase with sleep deprivation"
+    )
+
+sleep_model_priors = stan_glmer(formula = Reaction ~ Days + (1 | Subject),
+                           data = sleepstudy,
+                           family = gaussian, 
+                           prior_intercept = normal(250, 100),
+                           prior = normal(25, 10),
+                           prior_aux = exponential(1/100),
+                           prior_covariance = decov(regularization = 1, concentration = 1,
+                                                    shape = 1, scale = 1/200),
+                           chains = 4, iter = 5000*2, seed = 84735, 
+                           prior_PD = TRUE)
+
+set.seed(84735)
+updated_sleep_data <- sleepstudy %>%
+    add_epred_draws(object = sleep_model_priors, 
+                    ndraws = 200)
+
+names(updated_sleep_data)
+
+updated_sleep_data %>%
+    ggplot(aes(x = Days, y = Reaction)) +
+    geom_line(aes(y = .epred, group = .draw), alpha = 0.15)
+
+sleepstudy %>% 
+    add_predicted_draws(sleep_model_priors, ndraws = 12) %>%
+    # ungroup() %>% 
+    # summarise(num = n_distinct(Subject))
+    ggplot(aes(x = Days, y = Reaction)) +
+    geom_point(aes(y = .prediction, group = .draw)) + 
+    facet_wrap(~ .draw)
+

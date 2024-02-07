@@ -1,0 +1,265 @@
+---
+title: "Information Imbalance Tutorial"
+author: "Aiden Price"
+date: "2024-01-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source('II_Functions.R')
+```
+
+To see all functions which you can call within this class, please refer to: https://dadapy.readthedocs.io/en/latest/metric_comparisons.html
+
+```{r}
+library(ggplot2)   # For plotting.
+library(MASS)      # For the multivariate normal distribution.
+```
+
+## 3D Gaussian with Small Variance Along $z$
+
+In this section we define a simple dataset sampled from a 3D Gaussian distribution with a small variance along the $z$ axis.
+
+### Included methods:
+* Prediction of the full feature space vs. specified subsets of features: return_inf_imb_full_selected_coords
+
+```{r}
+# Create a sample data set
+N <- 1000
+
+# Identity for covariance.
+cov <- diag(3)
+
+# Reduce variance along z.
+cov[3, 3] <- 0.01^2  
+
+# Constant mean. 
+mean <- rep(0, 3)
+
+# Generate the sample data set.
+X <- mvrnorm(n = N, mu = mean, Sigma = cov)  
+
+# Convert the matrix X to a data frame.
+X_df <- as.data.frame(X)     
+
+# Use familiar dimension names.
+names(X_df) <- c("x", "y", "z")  
+
+# Sample of resulting data frame.
+head(X_df) 
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r}
+# Create the first scatter plot (x vs y)
+ggplot(X_df, aes(x = x, y = y)) +
+  geom_point() +
+  xlim(-5, 5) +
+  ylim(-5, 5) +
+  xlab("x") +
+  ylab("y") +
+  theme_bw()
+
+# Create the second scatter plot (x vs z)
+ggplot(X_df, aes(x = x, y = z)) +
+  geom_point() +
+  xlim(-5, 5) +
+  ylim(-5, 5) +
+  xlab("x") +
+  ylab("z") +
+  theme_bw()
+```
+
+```{r}
+# Define an instance of the "MetricComparisons" class.
+d <- MetricComparisons(coordinates = X, maxk = N - 1) 
+```
+
+The parameter $maxk$ defines the order of the last neighbor identified in space $\mathbf{B}$, when the information imbalance $\Delta(\mathbf{A}\rightarrow\mathbf{B})$ is computed: if a conditional rank in $\mathbf{B}$ is not within $maxk$, its value is set randomly to an integer between $maxk+1$ and $N-1$. The information imbalance is computed with no approximations when $maxk = N-1$; however, decreasing this parameter can significantly speed up the computation for large data sets. The default value of $maxk$ is 100.
+
+```{r}
+# List of the coordinate names.
+labels <- c("x", "y", "z") 
+
+# List of the the subsets of coordinates for which the imbalance should be computed.
+coord_list <- list(c(1), c(2), c(3), c(1,2), c(1,3), c(2,3)) 
+
+# Compute the information imbalances from the full 3D space to the spaces in "coord_list" and viceversa.
+imbalances <- return_inf_imb_full_selected_coords(d, coord_list, k = 1) 
+```
+
+The parameter $k$ defines how many neighbors of each point are considered in space $\mathbf{A}$ when we compute the information imbalance $\Delta(\mathbf{A}\rightarrow\mathbf{B})$, and its default value is 1.
+
+```{r}
+# Plot information imbalance plane.
+plot_inf_imb_plane(imbalances, coord_list, labels) 
+```
+
+From the graph above we see that the small variance along the $z$ dimension makes the $[x,y]$ space equivalent to the $[x,y,z]$ space (yellow circle) and the $z$ space (pink circle) is seen to be much less informative than the $x$ and $y$ spaces (blue and orange circles).
+
+## 4D Isotropic Gaussian
+
+In this example we explore the possibility of having a symmetrical yet partial sharing of information between two spaces. We will take the case of a data set sampled from a 4D isotropic Gaussian.
+
+### Included methods:
+* Prediction of two feature subsets vs. each other: "return_inf_imb_two_selected_coords"
+
+```{r}
+# sample the data set
+N <- 2000
+
+X <- matrix(rnorm(N * 4), ncol = 4)
+```
+
+```{r}
+# define an instance of the MetricComparisons class
+d <- MetricComparisons(coordinates = X, maxk = N - 1, metric = "euclidean")
+```
+
+```{r}
+# compute the imbalance between the [x, y] space and the [y, z] space
+imb_1common <- return_inf_imb_two_selected_coords(d, c(1, 2), c(2, 3))
+
+# compute the imbalance between the [x, y, z] space and the [y, z, w] space
+imb_2common <- return_inf_imb_two_selected_coords(d, c(1, 2, 3), c(2, 3, 4))
+
+print(imb_1common)
+print(imb_2common)
+```
+
+```{r}
+df <- data.frame(
+  imb_1_x = imb_1common[[1]],
+  imb_1_y = imb_1common[[2]],
+  imb_2_x = imb_2common[[1]],
+  imb_2_y = imb_2common[[2]]
+)
+
+# Create the plot
+ggplot() +
+  geom_point(data = df, aes(x = imb_1_x, y = imb_1_y), color = "blue") +
+  geom_point(data = df, aes(x = imb_2_x, y = imb_2_y), color = "red") +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed") +
+  xlab(expression(Delta(x[1] %->% x[2]))) +
+  ylab(expression(Delta(x[2] %->% x[1]))) +
+  theme_bw() +
+  xlim(0,1) +
+  ylim(0,1) 
+```
+We see that the information imbalances between the spaces $[x,y,z]$ and $[y,z,w]$ (orange circle) are lower than the imbalances between $[x,y]$ and $[y,z]$ (blue circle). However in both cases, since the information shared between the spaces is symmetric, the corresponding point lies along the diagonal of the information imbalance plane.
+
+## 10D Isotropic Gaussian Data Set
+
+In this example we analayse the information imbalance for a 10D Gaussian and isotropic dataset.
+
+### Included methods:
+* Prediction of the full feature space vs. a specified subsets of features: "return_inf_imb_full_selected_coords"
+* Prediction of the full feature space vs. all single features and viceversa: "return_inf_imb_full_all_coords"
+* Optimized combinatorial search of a subset of features up to a certain tuple size vs. the full feature space: "greedy_feature_selection_full"
+
+```{r}
+# sample data
+N <- 1000
+
+X <- matrix(rnorm(N * 10), ncol = 10)
+```
+
+```{r}
+d <- MetricComparisons(coordinates = X, maxk = N - 1, metric = "euclidean")
+```
+
+
+```{r}
+coord_list <- lapply(1:10, function(i) seq(1, i))
+```
+
+```{r}
+imbalances <- return_inf_imb_full_selected_coords(d, coord_list)
+```
+
+```{r}
+plot_inf_imb_plane(imbalances, coord_list) + ylim(0, 1) + xlim(0, 1)
+```
+We see that all subsets of coordinates are contained in the full space and that adding coordinates progressively brings the information imbalance to zero.
+
+If one wants to know how all of your single variables perform predicting the full space, you can use the following method:
+
+```{r}
+# compute the information imbalances from the full space to all single variables and viceversa:
+imbalances <- return_inf_imb_full_all_coords(d)
+```
+
+```{r}
+# plot information imbalance plane
+plot_inf_imb_plane(imbalances, 1:10) + ylim(0, 1) + xlim(0, 1)
+```
+
+We see that all single coordinates are contained in the full space (information imbalance approximately 0.5), yet that all the single spaces have low predictive power of the full space (information imbalance > 0.8).
+
+In cases with big feature spaces it might be difficult to find optimal imbalances in growing subsets of features due to long calculations. The greedy optimization speeds this process up:
+
+```{r}
+# find optimal sets of variables up to 7-plots (n_coords=7). 
+# n_best is a parameter that makes the greedy optimization better yet slower when higher.
+out <- greedy_feature_selection_full(d,
+                                     n_coords = 7,
+                                     n_best = 3,
+                                     k = 1)
+best_sets <- out[[1]]
+best_imbs <-
+    matrix(unlist(sapply(out[[2]], unlist)), ncol = 2, byrow = TRUE)
+all_imbs <- out[[3]]
+```
+
+```{r}
+# these are the optimum sets of each n-plet size:
+print(best_sets)
+```
+
+```{r}
+# for each optimum variable set of increasing size, these are the information imbalances 
+# [full-->reduced, reduced --> full]
+print(best_imbs)
+```
+
+```{r}
+plot_data <- data.frame(
+  NumVariables = 1:7, 
+  OptimalDelta = best_imbs[, 1]
+)
+
+# Create the plot
+ggplot(plot_data, aes(x = NumVariables, y = OptimalDelta)) +
+  geom_line() +  # Line plot
+  geom_point() +  # Add points
+  xlab("Number of variables in reduced space") +
+  ylab(expression("Optimal " ~ Delta ~ "(reduced space " ~ rightarrow ~ " full space)")) +
+  theme_bw()  # Minimal theme
+```
+We see that with increasing tuple size the optimal information imbalances ($best\_imbs$) improve. The according best coordinates are found easily ($best\_sets$). All imbalances of trial tuples of each size are stored in the third output ($all\_imbs$).
+
+```{r}
+# for example, the imbalances of all 4-plets predicting the the full space (reduced --> full) are:
+unlist(all_imbs[[3]][[1]])
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

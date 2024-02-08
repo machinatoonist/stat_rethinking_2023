@@ -93,6 +93,10 @@ climbers %>% glimpse()
  )
 
  
+saveRDS(climb_model, "fits/bayes_rules_climb_model.rds")
+
+climb_model = readRDS("fits/bayes_rules_climb_model.rds")
+
 # Example use of mcmc diagnostics ----
  x <- example_mcmc_draws(chains = 4, params = 6)
  dim(x)
@@ -109,10 +113,8 @@ climbers %>% glimpse()
  climb_model$coefficients
  mcmc_rank_hist(climb_model, regex_pars = "EVER04")
  mcmc_rank_hist(climb_model, pars = c("age", "oxygen_usedTRUE"))
- mcmc_rank_hist(climb_model, pars = pars = c("age", "oxygen_usedTRUE"))
- 
+
  color_scheme_set("viridisA")
- mcmc_rank_hist(climb_model, "age")
  mcmc_rank_hist(climb_model, pars = c("age", "oxygen_usedTRUE"), ref_line = TRUE)
  mcmc_rank_overlay(climb_model, "age", ref_line = TRUE)
  
@@ -164,7 +166,7 @@ climbers %>% glimpse()
  
  
  # Global model
- global_intercept = global_params$estimate[1]
+global_intercept = global_params$estimate[1]
 beta_1 = global_params$estimate[2]
 beta_2 = global_params$estimate[3]
  
@@ -194,7 +196,7 @@ beta_2 = global_params$estimate[3]
  new_expedition
 
  # Posterior predictions of binary outcome
- set.seed(84735)
+set.seed(84735)
 binary_prediction = posterior_predict(climb_model, newdata = new_expedition) 
 
 # First 3 prediction sets
@@ -264,3 +266,66 @@ classification_summary(data = climbers, model = climb_model, cutoff = 0.65)
 
 # Increasing specificity reduces our ability to predict when a climber will be successful
 # i.e. our false negative rate does up
+
+# Hierarchical Poisson and Negative Binomial Regression ----
+# Load data 
+data("airbnb")
+
+# Number of listings
+nrow(airbnb)
+
+# Number of neighbourhoods
+airbnb %>% glimpse()
+unique(airbnb$neighborhood) %>% length()
+
+airbnb %>% 
+    summarise(nlevels(neighborhood))
+
+# Analyse the number of AirBnB reviews between and within neighbourhoods
+
+airbnb %>% 
+    ggplot(aes(x = reviews)) +
+    geom_histogram(color = "white", breaks = seq(0, 200, by = 10))
+
+airbnb %>% 
+    ggplot(aes(x = rating, y = reviews)) +
+    geom_jitter()
+
+airbnb %>% 
+    ggplot(aes(x = room_type, y = reviews)) +
+    geom_violin()
+
+airbnb %>% 
+    filter(neighborhood %in% c("Albany Park", "East Garfield Park", "The Loop")) %>% 
+    ggplot(aes(x = rating, y = reviews, color =  room_type)) +
+    geom_jitter() +
+    facet_wrap(~neighborhood)
+
+airbnb_model_1 = stan_glmer(
+    reviews ~ rating + room_type + (1 | neighborhood),
+    data = airbnb, family = poisson,
+    prior_intercept = normal(3, 2.5, autoscale = TRUE),
+    prior = normal(0, 2.5, autoscale = TRUE),
+    prior_covariance = decov(reg = 1, conc = 1, shape = 1, scale = 1),
+    chains = 4, iter = 5000*2, seed = 84735
+)
+
+pp_check(airbnb_model_1) +
+    xlim(0, 200) +
+    xlab("reviews")
+
+
+airbnb_model_2 = stan_glmer(
+    reviews ~ rating + room_type + (1 | neighborhood),
+    data = airbnb, family = neg_binomial_2,
+    prior_intercept = normal(3, 2.5, autoscale = TRUE),
+    prior = normal(0, 2.5, autoscale = TRUE),
+    prior_aux = exponential(1, autoscale = TRUE),
+    prior_covariance = decov(reg = 1, conc = 1, shape = 1, scale = 1),
+    chains = 4, iter = 5000*2, seed = 84735
+)
+
+pp_check(airbnb_model_2) +
+    xlim(0, 200) +
+    xlab("reviews")
+

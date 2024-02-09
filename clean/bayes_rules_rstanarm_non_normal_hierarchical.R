@@ -329,3 +329,47 @@ pp_check(airbnb_model_2) +
     xlim(0, 200) +
     xlab("reviews")
 
+# > Interpretation of parameters for negative binomial ----
+(neg_binom_parameters = tidy(airbnb_model_2, effects = "fixed", conf.int = TRUE, conf.level = 0.80))
+
+(beta_1_low = neg_binom_parameters$conf.low[2])
+(beta_1_high = neg_binom_parameters$conf.high[2])
+print(paste0("There is an 80% chance that reviews will increase by between ", round(exp(beta_1_low)*100 - 100, 1), " and ", 
+             round(exp(beta_1_high)*100 - 100, 1), "% for every additional point in rating"))
+
+
+(beta_3_low = neg_binom_parameters$conf.low[4])
+(beta_3_high = neg_binom_parameters$conf.high[4])
+print(paste0("There is an 80% chance that reviews for shared room listings will be between ", round(exp(beta_3_low)*100, 1), " and ", 
+             round(exp(beta_3_high)*100, 1), "% as high as listings that are entirely private"))
+
+# > Neighborhood specific models and Posterior Predictions ----
+tidy(airbnb_model_2, effects = "ran_vals", conf.int = TRUE, conf.level = 0.80) %>% 
+    select(-c(group, term)) %>% 
+    filter(level %in% c("Albany_Park", "East_Garfield_Park", "The_Loop"))
+
+
+# Simulate number of reviews for each neighborhood for listings that have a 5 
+# star rating are completely private.
+
+airbnb %>% names()
+airbnb_model_2$formula
+airbnb %>% glimpse()
+
+unique(airbnb$room_type)
+sim_reviews = data.frame(
+    neighborhood = c("Albany_Park", "East_Garfield_Park", "The_Loop"),
+    room_type = factor(rep("Entire home/apt", 3)),
+    rating = rep(5, 3))
+sim_reviews
+
+predicted_reviews = posterior_predict(airbnb_model_2, newdata = sim_reviews)
+mcmc_areas(predicted_reviews, prob = 0.8) +
+    ggplot2::scale_y_discrete(labels = c("Albany_Park", "East_Garfield_Park", "The_Loop")) +
+    labs(title = "Posterior Predictions of Reviews",
+         subtitle = "Given 5 star rating and neigborhood",
+         x = "Reviews") +
+    xlim(0, 150)
+
+set.seed(84735)
+prediction_summary(airbnb_model_2, data = airbnb)      

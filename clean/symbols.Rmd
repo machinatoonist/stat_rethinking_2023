@@ -1,0 +1,68 @@
+---
+title: "symbols"
+author: "Matt Rosinski"
+date: "2024-02-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+To use these codes on a Windows keyboard, you'll typically hold down the `Alt` key and type the numeric code on the numeric keypad.
+
+### Latin Symbols
+
+| Symbol | Description               | ALT Code |
+|--------|---------------------------|----------|
+| à      | a with grave              | Alt+0224 |
+| á      | a with acute              | Alt+0225 |
+| â      | a with circumflex         | Alt+0226 |
+| ä      | a with diaeresis          | Alt+0228 |
+| ç      | c with cedilla            | Alt+0231 |
+| è      | e with grave              | Alt+0232 |
+| é      | e with acute              | Alt+0233 |
+| ê      | e with circumflex         | Alt+0234 |
+| ë      | e with diaeresis          | Alt+0235 |
+| ï      | i with diaeresis          | Alt+0239 |
+| ñ      | n with tilde              | Alt+0241 |
+| ô      | o with circumflex         | Alt+0244 |
+| ö      | o with diaeresis          | Alt+0246 |
+| ù      | u with grave              | Alt+0249 |
+| ú      | u with acute              | Alt+0250 |
+| û      | u with circumflex         | Alt+0251 |
+| ü      | u with diaeresis          | Alt+0252 |
+| ±      | Plus-minus sign           | Alt+0177 |
+| ÷      | Division sign             | Alt+0247 |
+| ×      | Multiplication sign       | Alt+0215 |
+| °      | Degree sign               | Alt+0176 |
+| ¬      | Not sign                  | Alt+0172 |
+
+### Greek Symbols
+
+| Symbol | Description       | ALT Code |
+|--------|-------------------|----------|
+| α      | Alpha             | Alt+0945 |
+| β      | Beta              | Alt+0946 |
+| γ      | Gamma             | Alt+0947 |
+| δ      | Delta             | Alt+0948 |
+| ε      | Epsilon           | Alt+0949 |
+| ζ      | Zeta              | Alt+0950 |
+| η      | Eta               | Alt+0951 |
+| θ      | Theta             | Alt+0952 |
+| ι      | Iota              | Alt+0953 |
+| κ      | Kappa             | Alt+0954 |
+| λ      | Lambda            | Alt+0955 |
+| μ      | Mu                | Alt+0956 |
+| ν      | Nu                | Alt+0957 |
+| ξ      | Xi                | Alt+0958 |
+| ο      | Omicron           | Alt+0959 |
+| π      | Pi                | Alt+0960 |
+| ρ      | Rho               | Alt+0961 |
+| σ      | Sigma             | Alt+0963 |
+| τ      | Tau               | Alt+0964 |
+| υ      | Upsilon           | Alt+0965 |
+| φ      | Phi               | Alt+0966 |
+| χ      | Chi               | Alt+0967 |
+| ψ      | Psi               | Alt+0968 |
+| ω      | Omega             | Alt+0969 |

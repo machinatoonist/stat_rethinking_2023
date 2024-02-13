@@ -129,3 +129,102 @@ as.data.frame(equality_model) %>%
            y_new = rpois(20000, lambda = lambda)) %>% 
     ggplot(aes(x = y_new)) +
     stat_count()
+
+# Simulate posterior predictive models for each state
+set.seed(84735)
+poisson_predictions = posterior_predict(equality_model, newdata = equality)
+
+ppc_intervals_grouped(equality$laws, yrep = poisson_predictions,
+                      x = equality$percent_urban,
+                      group = equality$historical,
+                      prob = 0.5, prob_outer = 0.95,
+                      facet_args = list(scales = "fixed"))
+
+# The observed number of laws fall 3.4 laws or 1.2 standard deviations from
+# their posterior mean predictions.
+# Roughly 78% of states fall within their corresponding 95% posterior prediction
+# interval.
+
+prediction_summary(model = equality_model, data = equality)
+
+# Cross validation
+set.seed(84735)
+poisson_cv = prediction_summary_cv(model = equality_model,
+                                   data = equality, k = 10)
+
+poisson_cv
+
+# Negative bionomial regression for overdispersed counts ----
+
+# Load data
+data("pulse_of_the_nation")
+
+pulse = pulse_of_the_nation %>% 
+    filter(books < 100)
+
+pulse %>% glimpse()
+ggplot(pulse, aes(x = books)) +
+    geom_histogram(color = "white")
+
+ggplot(pulse, aes(y = books, x = age)) +
+    geom_point()
+
+ggplot(pulse, aes(y = books, x = wise_unwise)) +
+    geom_boxplot()
+
+# The skewed count structure for books makes Poisson regression a reasonable
+# first approach
+
+books_poisson_sim = stan_glm(
+    books ~ age + wise_unwise,
+    data = pulse, family = poisson,
+    prior_intercept = normal(0, 2.5, autoscale = TRUE),
+    prior = normal(0, 2.5, autoscale = TRUE),
+    prior_aux = exponential(1, autoscale = TRUE),
+    chains = 4, iter = 5000*2, seed = 84735
+)
+
+# The fit is not great
+# The Poisson regression preserved the Poisson property of equal mean and variance
+pp_check(books_poisson_sim) +
+    xlab("books")
+
+# Mean and variability in readership are much different
+pulse %>% 
+    summarise(mean = mean(books),
+              variance = var(books))
+
+# When we cut the age range and group by wise_unwise and age this difference
+# between mean and variance remains
+pulse %>% 
+    group_by(cut(age, 3), wise_unwise) %>% 
+    summarise(mean = mean(books),
+              variance = var(books))
+
+# Book readership is said to be "overdispersed".
+# A random variable Y is said to be overdispersed if the observed variability
+# in Y exceeds the variability expected by the assumed probability model of Y.
+
+# An alternative to the Poisson for count data is the Negative Binomial probability model
+# Makes no assumption that E(Y) = Var(Y)
+
+books_negbin_sim = stan_glm(
+    books ~ age + wise_unwise,
+    data = pulse, family = neg_binomial_2,
+    prior_intercept = normal(0, 2.5, autoscale = TRUE),
+    prior = normal(0, 2.5, autoscale = TRUE),
+    prior_aux = exponential(1, autoscale = TRUE),
+    chains = 4, iter = 5000*2, seed = 84735
+)
+
+prior_summary(books_negbin_sim)
+
+pp_check(books_negbin_sim) +
+    xlim(0, 75) +
+    xlab("books")
+
+books_negbin_sim %>% tidy(conf.int = TRUE, conf.level = 0.8)
+exp(0.266)
+# Controlling for wise_unwise there's no relationship with age and readership
+# Controlling for age, people who prefer to be wise but unhappy read 1.3 times
+# or 30% more books

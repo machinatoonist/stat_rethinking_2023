@@ -228,3 +228,137 @@ exp(0.266)
 # Controlling for wise_unwise there's no relationship with age and readership
 # Controlling for age, people who prefer to be wise but unhappy read 1.3 times
 # or 30% more books
+
+# Ch 12 Exercises ----
+data("bald_eagles")
+eagles = bald_eagles
+eagles %>% glimpse()
+
+# > 12.5 ----
+ggplot(eagles, aes(x = count)) +
+    geom_histogram(position = "identity") +
+    labs(title = "The Distribution is Skewed to the Right")
+
+ggplot(eagles, aes(x = year, y = count)) +
+    geom_point() +
+    labs(title = "The count of bald eagles appears to be increasing with year")
+
+
+ggplot(eagles, aes(x = year, y = count/hours)) +
+    geom_point() +
+    labs(title = "The frequency of counts of bald eagles is also increasing with year")
+
+# > 12.6 ----
+eagle_normal_prior_model = stan_glm(
+    count ~ year + hours,
+    data = eagles,
+    family = gaussian,
+    prior_intercept = normal(5, 2.5, autoscale = TRUE),
+    prior = normal(0, 2.5, autoscale = TRUE),
+    prior_aux = exponential(1, autoscale = TRUE),
+    chains = 4, iter = 5000*2, seed = 84735,
+    prior_PD = TRUE
+)
+
+
+prior_summary(eagle_normal_prior_model)
+
+eagles %>%
+    add_epred_draws(eagle_normal_prior_model, ndraws = 100)
+    # ggplot(aes(x = year, y = count)) +
+    # geom_line(aes(y = .epred)) +
+    # ylim(0, 100)
+
+# Posterior predictive check
+eagle_normal_model = update(eagle_normal_prior_model, prior_PD = FALSE)
+
+pp_check(eagle_normal_model, plotfun = "hist", nreps = 5) +
+    geom_vline(xintercept = 0) +
+    xlab("count")
+
+# > 12.7 ----
+
+eagle_poisson_prior_model = stan_glm(
+    count ~ year + hours,
+    data = eagles, 
+    family = poisson,
+    prior_intercept = normal(5, 2.5, autoscale = TRUE),
+    prior = normal(0, 2.5, autoscale = TRUE),
+    prior_aux = exponential(1, autoscale = TRUE),
+    chains = 4, iter = 5000*2, seed = 84735,
+    prior_PD = TRUE
+)
+
+
+prior_summary(eagle_poisson_prior_model)
+pp_check(eagle_poisson_prior_model, plotfun = "hist", nreps = 5)
+
+eagle_poisson_model = update(eagle_poisson_prior_model, prior_PD = FALSE)
+
+pp_check(eagle_poisson_model)
+pp_check(eagle_poisson_model, plotfun = "hist", nreps = 5) +
+    geom_vline(xintercept = 0) +
+    xlab("count")
+
+# > 12.8 ----
+
+eagle_negbinom_prior_model = stan_glm(
+    count ~ year + hours,
+    data = eagles, 
+    family = neg_binomial_2,
+    prior_intercept = normal(5, 2.5, autoscale = TRUE),
+    prior = normal(0, 2.5, autoscale = TRUE),
+    prior_aux = exponential(1, autoscale = TRUE),
+    chains = 4, iter = 5000*2, seed = 84735,
+    prior_PD = TRUE
+)
+
+
+prior_summary(eagle_negbinom_prior_model)
+pp_check(eagle_negbinom_prior_model, plotfun = "hist", nreps = 5)
+
+eagle_negbinom_model = update(eagle_negbinom_prior_model, prior_PD = FALSE)
+
+pp_check(eagle_negbinom_model)
+pp_check(eagle_negbinom_model, plotfun = "hist", nreps = 5) +
+    geom_vline(xintercept = 0) +
+    xlab("count")
+
+eagle_parameter_est = tidy(eagle_negbinom_model, conf.int = TRUE, conf.level = 0.80)
+eagle_parameter_est
+
+(beta_1 = exp(eagle_parameter_est$estimate[2]))
+# Controlling for hours observed, for each additional year eagle counts increase by 7.9%
+
+(beta_2 = exp(eagle_parameter_est$estimate[3]))
+# Controlling for years, for each additional hour eagle counts increase 0.5%eagle_negbinom_model
+
+tidy(eagle_negbinom_model, conf.int = TRUE, conf.level = 0.95)
+exp(0.076)
+
+# Controlling for hours observed, the count of eagles is increasing by 7.6% with a 95% credible
+# interval that ranges from 4.2 to 11.2%  
+
+# Controlling for years, the 95% credible interval shows no significant variation
+# from 0 for the effect on number of hours observed.  There would be limits
+# on this interpretation which is constrained by the observed data.
+
+# > 12.9 ----
+poisson_cv = prediction_summary_cv(model = eagle_poisson_model, data = eagles, k = 10)
+poisson_cv$cv
+
+negbinom_cv = prediction_summary_cv(model = eagle_negbinom_model, data = eagles, k = 10)
+negbinom_cv$cv
+
+set.seed(84735)
+loo_1 = loo(eagle_poisson_model)
+loo_2 = loo(eagle_negbinom_model)
+
+loo_1$estimates
+loo_2$estimates
+# Compare
+c(loo_1$estimates[1], loo_2$estimates[1])
+
+?loo()
+
+# The Poisson appears to be a marginally better fit than negative binomial.
